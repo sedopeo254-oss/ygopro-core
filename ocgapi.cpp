@@ -70,6 +70,8 @@ void OCG_DuelNewCard(OCG_Duel ocg_duel, const OCG_NewCardInfo* info_ptr) {
 		if(game_field.is_location_useable(info.con, info.loc, info.seq)) {
 			card* pcard = pduel->new_card(info.code);
 			pcard->owner = info.team;
+			pcard->owner_duelist = 0;
+			pcard->current.duelist = 0;
 			game_field.add_card(info.con, pcard, (uint8_t)info.loc, (uint8_t)info.seq);
 			pcard->current.position = info.pos;
 			if(!(info.loc & LOCATION_ONFIELD) || (info.pos & POS_FACEUP)) {
@@ -91,16 +93,23 @@ void OCG_DuelNewCard(OCG_Duel ocg_duel, const OCG_NewCardInfo* info_ptr) {
 			player.extra_lists_main.resize(duelist);
 			player.extra_lists_extra.resize(duelist);
 			player.extra_lists_hand.resize(duelist);
+			player.extra_lists_grave.resize(duelist);
+			player.extra_lists_remove.resize(duelist);
 			player.extra_extra_p_count.resize(duelist);
+			player.extra_used_location.resize(duelist);
+			player.extra_disabled_location.resize(duelist);
 			player.extra_duelist_ids.resize(duelist);
 			player.extra_lps.resize(duelist, player.start_lp);
 			for(auto index = previous_size; index < duelist; ++index)
 				player.extra_duelist_ids[index] = static_cast<uint8_t>(index + 1);
 		}
+		const auto logical_duelist = duelist;
 		--duelist;
 		pcard->current.location = static_cast<uint8_t>(info.loc);
 		pcard->owner = info.team;
+		pcard->owner_duelist = logical_duelist;
 		pcard->current.controler = info.team;
+		pcard->current.duelist = logical_duelist;
 		pcard->current.position = POS_FACEDOWN_DEFENSE;
 		auto& list = (info.loc == LOCATION_DECK) ? player.extra_lists_main[duelist] : player.extra_lists_extra[duelist];
 		list.push_back(pcard);

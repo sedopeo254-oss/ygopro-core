@@ -17,7 +17,9 @@ void MultiplayerState::configure(MultiplayerMode new_mode) {
 		turn_player = 0;
 	} else if(new_mode == MultiplayerMode::THREE_V_ONE) {
 		players_mask = 0x0f;
-		teams = { 0, 1, 1, 1 };
+		// Anime order: Serenity -> Tristan -> Duke -> Nezbitt. The first
+		// three network seats form the allied team and the final seat is solo.
+		teams = { 0, 0, 0, 1 };
 		turn_order = { 0, 1, 2, 3 };
 		turn_player = 0;
 	}
@@ -63,7 +65,15 @@ uint8_t MultiplayerState::field_side_of(uint8_t player) const {
 		return NO_PLAYER;
 	if(duel_mode == MultiplayerMode::BATTLE_ROYALE)
 		return player < 2 ? 0 : 1;
-	return player == 0 ? 0 : 1;
+	return player < 3 ? 0 : 1;
+}
+
+uint8_t MultiplayerState::field_count(uint8_t field_side) const {
+	if(!enabled() || field_side > 1)
+		return 0;
+	if(duel_mode == MultiplayerMode::THREE_V_ONE)
+		return field_side == 0 ? 3 : 1;
+	return 1;
 }
 
 uint8_t MultiplayerState::duelist_index_of(uint8_t player) const {
@@ -71,7 +81,7 @@ uint8_t MultiplayerState::duelist_index_of(uint8_t player) const {
 		return NO_PLAYER;
 	if(duel_mode == MultiplayerMode::BATTLE_ROYALE)
 		return player & 1u;
-	return player == 0 ? 0 : static_cast<uint8_t>(player - 1);
+	return player < 3 ? player : 0;
 }
 
 uint8_t MultiplayerState::logical_player(uint8_t field_side, uint8_t duelist_index) const {
@@ -83,8 +93,26 @@ uint8_t MultiplayerState::logical_player(uint8_t field_side, uint8_t duelist_ind
 		return static_cast<uint8_t>((field_side ? 2 : 0) + duelist_index);
 	}
 	if(field_side == 0)
-		return duelist_index == 0 ? 0 : NO_PLAYER;
-	return duelist_index < 3 ? static_cast<uint8_t>(duelist_index + 1) : NO_PLAYER;
+		return duelist_index < 3 ? duelist_index : NO_PLAYER;
+	return duelist_index == 0 ? 3 : NO_PLAYER;
+}
+
+uint32_t MultiplayerState::encode_zone_sequence(uint8_t field_side, uint8_t duelist_index, uint8_t stride, uint32_t local_sequence) const {
+	if(duel_mode != MultiplayerMode::THREE_V_ONE || field_side != 0 || !stride || local_sequence >= stride)
+		return local_sequence;
+	return static_cast<uint32_t>(duelist_index) * stride + local_sequence;
+}
+
+uint32_t MultiplayerState::local_zone_sequence(uint8_t field_side, uint8_t stride, uint32_t sequence) const {
+	if(duel_mode != MultiplayerMode::THREE_V_ONE || field_side != 0 || !stride)
+		return sequence;
+	return sequence % stride;
+}
+
+uint8_t MultiplayerState::zone_duelist_index(uint8_t field_side, uint8_t stride, uint32_t sequence) const {
+	if(duel_mode != MultiplayerMode::THREE_V_ONE || field_side != 0 || !stride)
+		return 0;
+	return static_cast<uint8_t>(sequence / stride);
 }
 
 uint8_t MultiplayerState::current_player() const {
@@ -208,8 +236,8 @@ void MultiplayerState::update_winner() {
 		for(uint8_t team = 0; team < MAX_PLAYERS; ++team) {
 			if(team_mask & (1u << team)) {
 				winning_team = team;
-				if(team == 0 && is_active(0))
-					winning_player = 0;
+				if(team == 1 && is_active(3))
+					winning_player = 3;
 				return;
 			}
 		}

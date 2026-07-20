@@ -3333,10 +3333,24 @@ bool field::process(Processors::Turn& arg) {
 		infos.turn_player = turn_player;
 		if(multiplayer.enabled()) {
 			const auto logical_player = multiplayer.current_player();
-			tag_swap_to(turn_player, multiplayer.duelist_index_of(logical_player));
 			auto logical_message = pduel->new_message(MSG_MULTIPLAYER_NEW_TURN);
 			logical_message->write<uint8_t>(logical_player);
 			logical_message->write<uint8_t>(multiplayer.active_mask());
+			if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE) {
+				// Publish a fixed snapshot so every client can render the four
+				// independent resource areas even while a pile is not active.
+				for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
+					const auto side = multiplayer.field_side_of(logical);
+					const auto duelist = multiplayer.duelist_index_of(logical);
+					logical_message->write<uint32_t>(get_logical_lp(side, duelist));
+					logical_message->write<uint32_t>(get_logical_list(side, LOCATION_DECK, duelist).size());
+					logical_message->write<uint32_t>(get_logical_list(side, LOCATION_HAND, duelist).size());
+					logical_message->write<uint32_t>(get_logical_list(side, LOCATION_EXTRA, duelist).size());
+					logical_message->write<uint32_t>(get_logical_list(side, LOCATION_GRAVE, duelist).size());
+					logical_message->write<uint32_t>(get_logical_list(side, LOCATION_REMOVED, duelist).size());
+				}
+			}
+			tag_swap_to(turn_player, multiplayer.duelist_index_of(logical_player));
 		}
 		auto message = pduel->new_message(MSG_NEW_TURN);
 		message->write<uint8_t>(turn_player);
@@ -4173,7 +4187,7 @@ bool field::process(Processors::SolveChain& arg) {
 			pcard->enable_field_effect(true);
 			if(is_flag(DUEL_1_FACEUP_FIELD)) {
 				if(pcard->data.type & TYPE_FIELD) {
-					card* fscard = player[1 - pcard->current.controler].list_szone[5];
+					card* fscard = get_field_card(1 - pcard->current.controler, LOCATION_FZONE, 0);
 					if(fscard && fscard->is_position(POS_FACEUP))
 						fscard->enable_field_effect(false);
 				}
@@ -4306,7 +4320,7 @@ bool field::process(Processors::SolveChain& arg) {
 		if(is_flag(DUEL_1_FACEUP_FIELD)) {
 			if((pcard->data.type & TYPE_FIELD) && (peffect->type & EFFECT_TYPE_ACTIVATE)
 					&& !pcard->is_status(STATUS_LEAVE_CONFIRMED) && pcard->is_has_relation(*cait)) {
-				card* fscard = player[1 - pcard->current.controler].list_szone[5];
+				card* fscard = get_field_card(1 - pcard->current.controler, LOCATION_FZONE, 0);
 				if(fscard && fscard->is_position(POS_FACEUP))
 					destroy(fscard, nullptr, REASON_RULE, 1 - pcard->current.controler);
 			}
@@ -4676,29 +4690,31 @@ bool field::process(Processors::Adjust& arg) {
 				PlayerEliminationReason::LP,
 				PlayerEliminationReason::LP
 			};
-			for(uint8_t side = 0; side < 2; ++side) {
-				const bool lp_loss = player[side].lp <= 0
+			for(uint8_t logical_player = 0; logical_player < MultiplayerState::MAX_PLAYERS; ++logical_player) {
+				if(!multiplayer.is_active(logical_player))
+					continue;
+				const auto side = multiplayer.field_side_of(logical_player);
+				const auto duelist = multiplayer.duelist_index_of(logical_player);
+				const bool lp_loss = get_logical_lp(side, duelist) <= 0
 					&& !is_player_affected_by_effect(side, EFFECT_CANNOT_LOSE_LP);
+				if(!lp_loss)
+					continue;
+				lost_by_lp = true;
+				elimination_mask |= static_cast<uint8_t>(1u << logical_player);
+				reasons[logical_player] = PlayerEliminationReason::LP;
+			}
+			for(uint8_t side = 0; side < 2; ++side) {
 				const bool deck_loss = core.overdraw[side]
 					&& !is_player_affected_by_effect(side, EFFECT_CANNOT_LOSE_DECK);
-				if(!lp_loss && !deck_loss)
+				if(!deck_loss)
 					continue;
-				const auto reason = lp_loss ? PlayerEliminationReason::LP : PlayerEliminationReason::DECK;
-				lost_by_lp |= lp_loss;
-				lost_by_deck |= deck_loss;
-				if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE) {
-					const uint8_t team_mask = side == 0 ? 0x01 : 0x0e;
-					elimination_mask |= team_mask;
-					for(uint8_t logical_player = 0; logical_player < MultiplayerState::MAX_PLAYERS; ++logical_player) {
-						if(team_mask & (1u << logical_player))
-							reasons[logical_player] = reason;
-					}
-				} else {
-					const auto logical_player = multiplayer.logical_player(side, player[side].current_duelist);
-					if(logical_player < MultiplayerState::MAX_PLAYERS) {
-						elimination_mask |= static_cast<uint8_t>(1u << logical_player);
-						reasons[logical_player] = reason;
-					}
+				lost_by_deck = true;
+				const auto logical_player = multiplayer.logical_player(side, player[side].current_duelist);
+				if(logical_player < MultiplayerState::MAX_PLAYERS) {
+					const bool already_lost_by_lp = elimination_mask & (1u << logical_player);
+					elimination_mask |= static_cast<uint8_t>(1u << logical_player);
+					if(!already_lost_by_lp)
+						reasons[logical_player] = PlayerEliminationReason::DECK;
 				}
 			}
 

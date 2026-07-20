@@ -496,11 +496,15 @@ LUA_FUNCTION(GetPreviousLocation) {
 	return 1;
 }
 LUA_FUNCTION(GetSequence) {
-	lua_pushinteger(L, self->current.sequence);
+	lua_pushinteger(L, self->current.location & LOCATION_ONFIELD
+		? pduel->game_field->get_local_sequence(self->current.controler, self->current.location, self->current.sequence)
+		: self->current.sequence);
 	return 1;
 }
 LUA_FUNCTION(GetPreviousSequence) {
-	lua_pushinteger(L, self->previous.sequence);
+	lua_pushinteger(L, self->previous.location & LOCATION_ONFIELD
+		? pduel->game_field->get_local_sequence(self->previous.controler, self->previous.location, self->previous.sequence)
+		: self->previous.sequence);
 	return 1;
 }
 LUA_FUNCTION(GetSummonType) {

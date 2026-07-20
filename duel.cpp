@@ -143,7 +143,7 @@ int32_t duel::get_next_integer(int32_t l, int32_t h) {
 	return static_cast<int32_t>((n % range) + l);
 }
 duel::duel_message* duel::new_message(uint8_t message) {
-	return &(messages.emplace_back(message));
+	return &(messages.emplace_back(message, game_field && game_field->multiplayer.enabled()));
 }
 const card_data& duel::read_card(uint32_t code) {
 	if(auto search = data_cache.find(code); search != data_cache.end())
@@ -154,7 +154,7 @@ const card_data& duel::read_card(uint32_t code) {
 	read_card_done_callback(read_card_done_payload, &data);
 	return *ret;
 }
-duel::duel_message::duel_message(uint8_t message) {
+duel::duel_message::duel_message(uint8_t message, bool encode_duelist_) : encode_duelist(encode_duelist_) {
 	write<uint8_t>(message);
 }
 void duel::duel_message::write(const void* buff, size_t size) {
@@ -168,7 +168,9 @@ void duel::duel_message::write(loc_info loc) {
 	write<uint8_t>(loc.controler);
 	write<uint8_t>(loc.location);
 	write<uint32_t>(loc.sequence);
-	write<uint32_t>(loc.position);
+	const auto position = encode_duelist
+		? loc.position | (static_cast<uint32_t>(loc.duelist) << 24) : loc.position;
+	write<uint32_t>(position);
 }
 
 card_data::card_data(const OCG_CardData& data) {

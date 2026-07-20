@@ -46,13 +46,14 @@ class duel {
 public:
 	class duel_message {
 	private:
+		bool encode_duelist{};
 		template<typename T>
 		void write_internal(T data) {
 			write(&data, sizeof(T));
 		}
 	public:
 		std::vector<uint8_t> data;
-		explicit duel_message(uint8_t _message);
+		explicit duel_message(uint8_t _message, bool encode_duelist_ = false);
 		void write(const void* buff, size_t size);
 		void write(loc_info loc);
 		template<typename T, typename T2>

@@ -1035,7 +1035,7 @@ LUA_STATIC_FUNCTION(GetEnvironment) {
 		}
 		return false;
 	};
-	if(!IsEnabled(pduel->game_field->player[0].list_szone[5]) && !IsEnabled(pduel->game_field->player[1].list_szone[5])) {
+	if(!IsEnabled(pduel->game_field->get_field_card(0, LOCATION_FZONE, 0)) && !IsEnabled(pduel->game_field->get_field_card(1, LOCATION_FZONE, 0))) {
 		effect_set eset;
 		pduel->game_field->filter_field_effect(EFFECT_CHANGE_ENVIRONMENT, &eset);
 		if(eset.size()) {
@@ -1062,7 +1062,7 @@ LUA_STATIC_FUNCTION(IsEnvironment) {
 	auto IsEnabled = [](card* pcard) { return pcard && pcard->is_position(POS_FACEUP) && pcard->get_status(STATUS_EFFECT_ENABLED); };
 	auto CheckFzone = [&](uint8_t player) {
 		if(playerid == player || playerid == PLAYER_ALL) {
-			const auto& pcard = pduel->game_field->player[player].list_szone[5];
+			const auto& pcard = pduel->game_field->get_field_card(player, LOCATION_FZONE, 0);
 			if(IsEnabled(pcard) && code == pcard->get_code())
 				return true;
 		}
@@ -1089,7 +1089,7 @@ LUA_STATIC_FUNCTION(IsEnvironment) {
 	auto ShouldApplyChangeEnv = [&]() {
 		if((loc & (LOCATION_FZONE | LOCATION_SZONE)) == 0)
 			return false;
-		return !(IsEnabled(pduel->game_field->player[0].list_szone[5]) || IsEnabled(pduel->game_field->player[1].list_szone[5]));
+		return !(IsEnabled(pduel->game_field->get_field_card(0, LOCATION_FZONE, 0)) || IsEnabled(pduel->game_field->get_field_card(1, LOCATION_FZONE, 0)));
 	};
 
 	if(loc & LOCATION_FZONE && (CheckFzone(0) || CheckFzone(1)))
@@ -1179,6 +1179,28 @@ LUA_STATIC_FUNCTION(Damage) {
 		return 1;
 	});
 }
+LUA_STATIC_FUNCTION(DamagePlayer) {
+	check_action_permission(L);
+	check_param_count(L, 3);
+	auto logical_player = lua_get<uint8_t>(L, 1);
+	if(!pduel->game_field->multiplayer.enabled() || logical_player >= MultiplayerState::MAX_PLAYERS)
+		return 0;
+	auto amount = lua_get<int64_t>(L, 2);
+	const auto actual_amount = amount > 0 ? static_cast<uint32_t>(amount) : 0;
+	auto reason = lua_get<uint32_t>(L, 3);
+	bool is_step = lua_get<bool, false>(L, 4);
+	auto reason_player = lua_get<uint8_t>(L, 5, pduel->game_field->core.reason_player);
+	if(reason_player > PLAYER_NONE)
+		reason_player = pduel->game_field->core.reason_player;
+	const auto side = pduel->game_field->multiplayer.field_side_of(logical_player);
+	const auto duelist = pduel->game_field->multiplayer.duelist_index_of(logical_player);
+	pduel->game_field->damage(pduel->game_field->core.reason_effect, reason, reason_player, nullptr,
+		side, actual_amount, is_step, duelist);
+	return yieldk({
+		lua_pushinteger(L, pduel->game_field->returns.at<uint32_t>(0));
+		return 1;
+	});
+}
 LUA_STATIC_FUNCTION(Recover) {
 	check_action_permission(L);
 	check_param_count(L, 3);
@@ -1195,6 +1217,28 @@ LUA_STATIC_FUNCTION(Recover) {
 	if (reason_player > PLAYER_NONE)
 		reason_player = pduel->game_field->core.reason_player;
 	pduel->game_field->recover(pduel->game_field->core.reason_effect, reason, reason_player, playerid, actual_amount, is_step);
+	return yieldk({
+		lua_pushinteger(L, pduel->game_field->returns.at<uint32_t>(0));
+		return 1;
+	});
+}
+LUA_STATIC_FUNCTION(RecoverPlayer) {
+	check_action_permission(L);
+	check_param_count(L, 3);
+	auto logical_player = lua_get<uint8_t>(L, 1);
+	if(!pduel->game_field->multiplayer.enabled() || logical_player >= MultiplayerState::MAX_PLAYERS)
+		return 0;
+	auto amount = lua_get<int64_t>(L, 2);
+	const auto actual_amount = amount > 0 ? static_cast<uint32_t>(amount) : 0;
+	auto reason = lua_get<uint32_t>(L, 3);
+	bool is_step = lua_get<bool, false>(L, 4);
+	auto reason_player = lua_get<uint8_t>(L, 5, pduel->game_field->core.reason_player);
+	if(reason_player > PLAYER_NONE)
+		reason_player = pduel->game_field->core.reason_player;
+	const auto side = pduel->game_field->multiplayer.field_side_of(logical_player);
+	const auto duelist = pduel->game_field->multiplayer.duelist_index_of(logical_player);
+	pduel->game_field->recover(pduel->game_field->core.reason_effect, reason, reason_player,
+		side, actual_amount, is_step, duelist);
 	return yieldk({
 		lua_pushinteger(L, pduel->game_field->returns.at<uint32_t>(0));
 		return 1;

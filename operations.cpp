@@ -150,15 +150,23 @@ void field::equip(uint8_t equip_player, card* equip_card, card* target, bool fac
 void field::draw(effect* reason_effect, uint32_t reason, uint8_t reason_player, uint8_t playerid, uint16_t count) {
 	emplace_process<Processors::Draw>(reason_effect, reason, reason_player, playerid, count);
 }
-void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player, card* reason_card, uint8_t playerid, uint32_t amount, bool is_step) {
+void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player, card* reason_card, uint8_t playerid, uint32_t amount, bool is_step, uint8_t duelist) {
 	if(reason & REASON_BATTLE)
 		reason_effect = nullptr;
 	else
 		reason_card = nullptr;
-	emplace_process<Processors::Damage>(reason_effect, reason, reason_player, reason_card, playerid, amount, is_step);
+	if(duelist == 0xff) {
+		if((reason & REASON_BATTLE) && core.attack_target && core.attack_target->current.controler == playerid)
+			duelist = core.attack_target->current.duelist;
+		else
+			duelist = player[playerid].current_duelist;
+	}
+	emplace_process<Processors::Damage>(reason_effect, reason, reason_player, reason_card, playerid, amount, is_step, duelist);
 }
-void field::recover(effect* reason_effect, uint32_t reason, uint32_t reason_player, uint32_t playerid, uint32_t amount, bool is_step) {
-	emplace_process<Processors::Recover>(reason_effect, reason, reason_player, playerid, amount, is_step);
+void field::recover(effect* reason_effect, uint32_t reason, uint32_t reason_player, uint32_t playerid, uint32_t amount, bool is_step, uint8_t duelist) {
+	if(duelist == 0xff)
+		duelist = player[playerid].current_duelist;
+	emplace_process<Processors::Recover>(reason_effect, reason, reason_player, playerid, amount, is_step, duelist);
 }
 void field::summon(uint8_t sumplayer, card* target, effect* proc, bool ignore_count, uint8_t min_tribute, uint32_t zone) {
 	emplace_process<Processors::SummonRule>(sumplayer, target, proc, ignore_count, min_tribute, zone);
@@ -535,6 +543,7 @@ bool field::process(Processors::Damage& arg) {
 	auto reason_player = arg.reason_player;
 	auto reason_card = arg.reason_card;
 	auto playerid = arg.playerid;
+	auto duelist = arg.duelist;
 	auto amount = arg.amount;
 	auto is_step = arg.is_step;
 	switch(arg.step) {
@@ -551,7 +560,7 @@ bool field::process(Processors::Damage& arg) {
 				pduel->lua->add_param<LuaParam::INT>(reason_player);
 				pduel->lua->add_param<LuaParam::CARD>(reason_card);
 				if(peff->check_value_condition(4)) {
-					recover(reason_effect, (reason & REASON_RRECOVER) | REASON_RDAMAGE | REASON_EFFECT, reason_player, playerid, amount, is_step);
+					recover(reason_effect, (reason & REASON_RRECOVER) | REASON_RDAMAGE | REASON_EFFECT, reason_player, playerid, amount, is_step, duelist);
 					arg.step = 2;
 					return FALSE;
 				}
@@ -596,16 +605,21 @@ bool field::process(Processors::Damage& arg) {
 	case 1: {
 		if(arg.is_reflected)
 			playerid = 1 - playerid;
+		if(arg.is_reflected)
+			duelist = player[playerid].current_duelist;
 		if(arg.is_reflected || (reason & REASON_RRECOVER))
 			arg.step = 2;
 		core.hint_timing[playerid] |= TIMING_DAMAGE;
-		player[playerid].lp -= amount;
+		auto& logical_lp = get_logical_lp(playerid, duelist);
+		logical_lp -= amount;
 		auto message = pduel->new_message(MSG_DAMAGE);
 		message->write<uint8_t>(playerid);
 		message->write<uint32_t>(amount);
+		if(multiplayer.enabled())
+			message->write<uint8_t>(multiplayer.logical_player(playerid, duelist));
 		raise_event(reason_card, EVENT_DAMAGE, reason_effect, reason, reason_player, playerid, amount);
 		if(reason == REASON_BATTLE && reason_card) {
-			if((player[playerid].lp <= 0) && (core.attack_target == nullptr) && reason_card->is_affected_by_effect(EFFECT_MATCH_KILL) && !is_player_affected_by_effect(playerid, EFFECT_CANNOT_LOSE_LP)) {
+			if((logical_lp <= 0) && (core.attack_target == nullptr) && reason_card->is_affected_by_effect(EFFECT_MATCH_KILL) && !is_player_affected_by_effect(playerid, EFFECT_CANNOT_LOSE_LP)) {
 				message = pduel->new_message(MSG_MATCH_KILL);
 				message->write<uint32_t>(reason_card->data.code);
 			}
@@ -613,8 +627,8 @@ bool field::process(Processors::Damage& arg) {
 			raise_event(reason_card, EVENT_BATTLE_DAMAGE, nullptr, 0, reason_player, playerid, amount);
 			process_single_event();
 		}
-		if(is_player_affected_by_effect(playerid, EFFECT_CANNOT_LOSE_LP) && player[playerid].lp < 0)
-			player[playerid].lp = 0;
+		if(is_player_affected_by_effect(playerid, EFFECT_CANNOT_LOSE_LP) && logical_lp < 0)
+			logical_lp = 0;
 		process_instant_event();
 		return FALSE;
 	}
@@ -638,6 +652,7 @@ bool field::process(Processors::Recover& arg) {
 	auto reason = arg.reason;
 	auto reason_player = arg.reason_player;
 	auto playerid = arg.playerid;
+	auto duelist = arg.duelist;
 	auto amount = arg.amount;
 	auto is_step = arg.is_step;
 	switch(arg.step) {
@@ -653,7 +668,7 @@ bool field::process(Processors::Recover& arg) {
 				pduel->lua->add_param<LuaParam::INT>(reason);
 				pduel->lua->add_param<LuaParam::INT>(reason_player);
 				if(peff->check_value_condition(3)) {
-					damage(reason_effect, (reason & REASON_RDAMAGE) | REASON_RRECOVER | REASON_EFFECT, reason_player, nullptr, playerid, amount, is_step);
+					damage(reason_effect, (reason & REASON_RDAMAGE) | REASON_RRECOVER | REASON_EFFECT, reason_player, nullptr, playerid, amount, is_step, duelist);
 					arg.step = 2;
 					return FALSE;
 				}
@@ -670,10 +685,12 @@ bool field::process(Processors::Recover& arg) {
 		if(reason & REASON_RDAMAGE)
 			arg.step = 2;
 		core.hint_timing[playerid] |= TIMING_RECOVER;
-		player[playerid].lp += amount;
+		get_logical_lp(playerid, duelist) += amount;
 		auto message = pduel->new_message(MSG_RECOVER);
 		message->write<uint8_t>(playerid);
 		message->write<uint32_t>(amount);
+		if(multiplayer.enabled())
+			message->write<uint8_t>(multiplayer.logical_player(playerid, duelist));
 		raise_event(nullptr, EVENT_RECOVER, reason_effect, reason, reason_player, playerid, amount);
 		process_instant_event();
 		return FALSE;
@@ -1230,14 +1247,14 @@ bool field::process(Processors::SwapControl& arg) {
 		}
 		int32_t ct = get_useable_count(nullptr, p1, LOCATION_MZONE, reason_player, LOCATION_REASON_CONTROL);
 		for(auto& pcard : targets1->container) {
-			if(pcard->current.sequence >= 5)
+			if(get_local_sequence(pcard->current.controler, LOCATION_MZONE, pcard->current.sequence) >= 5)
 				--ct;
 		}
 		if(ct < 0)
 			return FALSE;
 		ct = get_useable_count(nullptr, p2, LOCATION_MZONE, reason_player, LOCATION_REASON_CONTROL);
 		for(auto& pcard : targets2->container) {
-			if(pcard->current.sequence >= 5)
+			if(get_local_sequence(pcard->current.controler, LOCATION_MZONE, pcard->current.sequence) >= 5)
 				--ct;
 		}
 		if(ct < 0)
@@ -1262,7 +1279,7 @@ bool field::process(Processors::SwapControl& arg) {
 		}
 		card* pcard1 = *targets1->it;
 		uint8_t p1 = pcard1->current.controler;
-		uint8_t s1 = pcard1->current.sequence;
+		uint8_t s1 = static_cast<uint8_t>(get_local_sequence(p1, LOCATION_MZONE, pcard1->current.sequence));
 		uint32_t flag;
 		get_useable_count(nullptr, p1, LOCATION_MZONE, reason_player, LOCATION_REASON_CONTROL, 0xff, &flag);
 		flag = (flag & ~(1 << s1) & 0xff) | ~0x1f;
@@ -1278,7 +1295,7 @@ bool field::process(Processors::SwapControl& arg) {
 		arg.self_selected_sequence = returns.at<int8_t>(2);
 		card* pcard2 = *targets2->it;
 		uint8_t p2 = pcard2->current.controler;
-		uint8_t s2 = pcard2->current.sequence;
+		uint8_t s2 = static_cast<uint8_t>(get_local_sequence(p2, LOCATION_MZONE, pcard2->current.sequence));
 		uint32_t flag;
 		get_useable_count(nullptr, p2, LOCATION_MZONE, reason_player, LOCATION_REASON_CONTROL, 0xff, &flag);
 		flag = (flag & ~(1 << s2) & 0xff) | ~0x1f;
@@ -4965,7 +4982,8 @@ bool field::process(Processors::MoveToField& arg) {
 				}
 			}
 			if(!is_flag(DUEL_TRAP_MONSTERS_NOT_USE_ZONE) && (ret == 2)) {
-				returns.set<int8_t>(2, target->previous.sequence);
+				returns.set<int8_t>(2, static_cast<int8_t>(get_local_sequence(target->previous.controler,
+					LOCATION_SZONE, target->previous.sequence)));
 				return FALSE;
 			}
 			if(move_player == playerid) {
@@ -5104,7 +5122,8 @@ bool field::process(Processors::MoveToField& arg) {
 				}
 				if(peff->get_handler_player() != target->current.controler)
 					value = value >> 16;
-				if(value & (0x1 << target->current.sequence)) {
+				const auto local_sequence = get_local_sequence(target->current.controler, LOCATION_MZONE, target->current.sequence);
+				if(value & (0x1u << local_sequence)) {
 					peff->dec_count();
 				}
 			}
@@ -5130,7 +5149,8 @@ bool field::process(Processors::MoveToField& arg) {
 					peffect->code = EFFECT_USE_EXTRA_SZONE;
 					peffect->flag[0] = EFFECT_FLAG_CANNOT_DISABLE;
 					peffect->reset_flag = RESET_EVENT + 0x1fe0000;
-					peffect->value = 1 + (0x10000 << target->previous.sequence);
+					const auto local_sequence = get_local_sequence(target->previous.controler, LOCATION_SZONE, target->previous.sequence);
+					peffect->value = 1 + (0x10000 << local_sequence);
 					target->add_effect(peffect);
 				}
 			}
@@ -5657,7 +5677,8 @@ bool field::process(Processors::SelectRelease& arg) {
 			if(ct < min) {
 				arg.must_choose_one = std::make_unique<card_set>();
 				for(auto& pcard : core.release_cards) {
-					if((pcard->current.location == LOCATION_MZONE && pcard->current.controler == toplayer && ((zone >> pcard->current.sequence) & 1)))
+					if((pcard->current.location == LOCATION_MZONE && pcard->current.controler == toplayer
+						&& ((zone >> get_local_sequence(toplayer, LOCATION_MZONE, pcard->current.sequence)) & 1)))
 						arg.must_choose_one->insert(pcard);
 				}
 			}
@@ -5837,7 +5858,8 @@ bool field::process(Processors::SelectTribute& arg) {
 		int32_t ct = get_tofield_count(target, toplayer, LOCATION_MZONE, playerid, LOCATION_REASON_TOFIELD, zone);
 		card_set must_choose_one;
 		for(auto& pcard : core.release_cards) {
-			if((pcard->current.location == LOCATION_MZONE && pcard->current.controler == toplayer && ((zone >> pcard->current.sequence) & 1)))
+			if((pcard->current.location == LOCATION_MZONE && pcard->current.controler == toplayer
+				&& ((zone >> get_local_sequence(toplayer, LOCATION_MZONE, pcard->current.sequence)) & 1)))
 				if(ct <= 0)
 					must_choose_one.insert(pcard);
 			rmax += (pcard)->release_param;

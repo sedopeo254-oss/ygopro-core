@@ -53,26 +53,40 @@ void test_battle_royale_multi_elimination() {
 void test_three_vs_one_team_winner() {
 	MultiplayerState state;
 	state.configure(MultiplayerMode::THREE_V_ONE);
-	expect(state.team_of(0) == 0, "player 0 must be the solo team");
-	expect(state.team_of(1) == 1 && state.team_of(2) == 1 && state.team_of(3) == 1,
-		"players 1, 2 and 3 must share the opposing team");
-	expect(state.field_side_of(0) == 0 && state.field_side_of(1) == 1,
-		"the solo player and opposing team must use different field sides");
-	expect(state.duelist_index_of(3) == 2 && state.logical_player(1, 2) == 3,
-		"3 vs 1 duelist mapping must preserve player 3");
-	expect(state.eliminate(1, PlayerEliminationReason::LP), "first team member elimination must succeed");
+	expect(state.team_of(0) == 0 && state.team_of(1) == 0 && state.team_of(2) == 0,
+		"players 0, 1 and 2 must form the three-player team");
+	expect(state.team_of(3) == 1, "player 3 must be the solo team");
+	expect(state.field_side_of(0) == 0 && state.field_side_of(3) == 1,
+		"the three-player team and solo player must use different field sides");
+	expect(state.field_count(0) == 3 && state.field_count(1) == 1,
+		"the allied side must own three fields while Nezbitt owns one");
+	expect(state.encode_zone_sequence(0, 0, 7, 2) == 2
+		&& state.encode_zone_sequence(0, 1, 7, 2) == 9
+		&& state.encode_zone_sequence(0, 2, 7, 2) == 16,
+		"the same local monster zone must map to a distinct slot for each ally");
+	expect(state.local_zone_sequence(0, 7, 16) == 2
+		&& state.zone_duelist_index(0, 7, 16) == 2,
+		"an internal allied slot must decode back to Duke's local field");
+	expect(state.duelist_index_of(2) == 2 && state.logical_player(0, 2) == 2,
+		"the allied duelist mapping must preserve Duke's seat");
+	expect(state.duelist_index_of(3) == 0 && state.logical_player(1, 0) == 3,
+		"the solo field must map to Nezbitt's seat");
+	expect(state.next_active_player(0) == 1 && state.next_active_player(1) == 2
+		&& state.next_active_player(2) == 3 && state.next_active_player(3) == 0,
+		"3 vs 1 must follow Serenity, Tristan, Duke, then Nezbitt");
+	expect(state.eliminate(0, PlayerEliminationReason::LP), "first team member elimination must succeed");
 	expect(!state.has_winner(), "one eliminated team member must not end 3 vs 1");
-	expect(state.eliminate(2, PlayerEliminationReason::LP), "second team member elimination must succeed");
+	expect(state.eliminate(1, PlayerEliminationReason::LP), "second team member elimination must succeed");
 	expect(!state.has_winner(), "two eliminated team members must not end 3 vs 1");
-	expect(state.eliminate(3, PlayerEliminationReason::LP), "last team member elimination must succeed");
+	expect(state.eliminate(2, PlayerEliminationReason::LP), "last team member elimination must succeed");
 	expect(state.has_winner(), "eliminating the full team must end 3 vs 1");
-	expect(state.winner_team() == 0 && state.winner_player() == 0, "the solo player must win as team 0");
+	expect(state.winner_team() == 1 && state.winner_player() == 3, "Nezbitt must win as the solo team");
 
 	MultiplayerState opposing_win;
 	opposing_win.configure(MultiplayerMode::THREE_V_ONE);
-	expect(opposing_win.eliminate(0, PlayerEliminationReason::LP), "solo player elimination must succeed");
+	expect(opposing_win.eliminate(3, PlayerEliminationReason::LP), "solo player elimination must succeed");
 	expect(opposing_win.has_winner(), "eliminating the solo player must end 3 vs 1");
-	expect(opposing_win.winner_team() == 1, "the three-player team must win");
+	expect(opposing_win.winner_team() == 0, "the three-player team must win");
 	expect(opposing_win.winner_player() == MultiplayerState::NO_PLAYER,
 		"a team victory must not invent an individual winner");
 }

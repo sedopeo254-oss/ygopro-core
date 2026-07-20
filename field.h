@@ -102,7 +102,11 @@ struct player_info {
 	std::vector<card_vector> extra_lists_main;
 	std::vector<card_vector> extra_lists_hand;
 	std::vector<card_vector> extra_lists_extra;
+	std::vector<card_vector> extra_lists_grave;
+	std::vector<card_vector> extra_lists_remove;
 	std::vector<uint32_t> extra_extra_p_count;
+	std::vector<uint32_t> extra_used_location;
+	std::vector<uint32_t> extra_disabled_location;
 	std::vector<uint8_t> extra_duelist_ids;
 	std::vector<int32_t> extra_lps;
 	player_info(const OCG_Player& team) :
@@ -434,6 +438,15 @@ public:
 	void swap_card(card* pcard1, card* pcard2);
 	void set_control(card* pcard, uint8_t playerid, uint16_t reset_phase, uint8_t reset_count);
 	card* get_field_card(uint32_t playerid, uint32_t location, uint32_t sequence);
+	uint32_t get_local_sequence(uint8_t playerid, uint8_t location, uint32_t sequence) const;
+	uint8_t get_zone_duelist(uint8_t playerid, uint8_t location, uint32_t sequence) const;
+	uint32_t get_zone_sequence(uint8_t playerid, uint8_t location, uint32_t sequence, uint8_t duelist = 0xff) const;
+	card_vector& get_logical_list(uint8_t playerid, uint8_t location, uint8_t duelist);
+	uint32_t& get_logical_used_location(uint8_t playerid, uint8_t duelist);
+	uint32_t& get_logical_disabled_location(uint8_t playerid, uint8_t duelist);
+	uint32_t& get_logical_extra_p_count(uint8_t playerid, uint8_t duelist);
+	int32_t& get_logical_lp(uint8_t playerid, uint8_t duelist);
+	uint8_t get_effect_duelist(uint8_t playerid) const;
 	int32_t is_field_location_valid(uint32_t location, uint32_t sequence);
 	int32_t is_location_useable(uint32_t playerid, uint32_t location, uint32_t sequence);
 	int32_t get_useable_count(card* pcard, uint8_t playerid, uint8_t location, uint8_t uplayer, uint32_t reason, uint32_t zone = 0xff, uint32_t* list = nullptr);
@@ -451,9 +464,9 @@ public:
 	uint32_t get_linked_zone(int32_t playerid, bool free = false, bool actually_linked = false);
 	void get_linked_cards(uint8_t self, uint8_t location1, uint8_t location2, card_set* cset);
 	int32_t check_extra_link(int32_t playerid, card* pcard, int32_t sequence);
-	void get_cards_in_zone(card_set* cset, uint32_t zone, int32_t playerid, int32_t location) const;
+	void get_cards_in_zone(card_set* cset, uint32_t zone, int32_t playerid, int32_t location, uint8_t duelist = 0xff) const;
 	void shuffle(uint8_t playerid, uint8_t location);
-	void reset_sequence(uint8_t playerid, uint8_t location);
+	void reset_sequence(uint8_t playerid, uint8_t location, uint8_t duelist = 0xff);
 	void swap_deck_and_grave(uint8_t playerid);
 	void reverse_deck(uint8_t playerid);
 	int get_player_count(uint8_t playerid);
@@ -631,8 +644,8 @@ public:
 	void swap_control(effect* reason_effect, uint32_t reason_player, card* pcard1, card* pcard2, uint32_t reset_phase, uint32_t reset_count);
 	void equip(uint8_t equip_player, card* equip_card, card* target, bool faceup, bool is_step);
 	void draw(effect* reason_effect, uint32_t reason, uint8_t reason_player, uint8_t playerid, uint16_t count);
-	void damage(effect* reason_effect, uint32_t reason, uint8_t reason_player, card* reason_card, uint8_t playerid, uint32_t amount, bool is_step = false);
-	void recover(effect* reason_effect, uint32_t reason, uint32_t reason_player, uint32_t playerid, uint32_t amount, bool is_step = false);
+	void damage(effect* reason_effect, uint32_t reason, uint8_t reason_player, card* reason_card, uint8_t playerid, uint32_t amount, bool is_step = false, uint8_t duelist = 0xff);
+	void recover(effect* reason_effect, uint32_t reason, uint32_t reason_player, uint32_t playerid, uint32_t amount, bool is_step = false, uint8_t duelist = 0xff);
 	void summon(uint8_t sumplayer, card* target, effect* summon_procedure_effect, bool ignore_count, uint8_t min_tribute, uint32_t zone = 0x1f);
 	void mset(uint8_t setplayer, card* target, effect* proc, bool ignore_count, uint8_t min_tribute, uint32_t zone = 0x1f);
 	void special_summon_rule(uint8_t sumplayer, card* target, uint32_t summon_type);

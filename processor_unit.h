@@ -517,6 +517,7 @@ struct Draw : public Process<false> {
 struct Damage : public Process<false> {
 	uint8_t reason_player;
 	uint8_t playerid;
+	uint8_t duelist;
 	bool is_step;
 	bool is_reflected;
 	uint32_t amount;
@@ -524,20 +525,21 @@ struct Damage : public Process<false> {
 	card* reason_card;
 	effect* reason_effect;
 	Damage(uint16_t step_, effect* reason_effect_, uint32_t reason_, uint8_t reason_player_,
-					card* reason_card_, uint8_t playerid_, uint32_t amount_, bool is_step_) :
-		Process(step_), reason_player(reason_player_), playerid(playerid_), is_step(is_step_), is_reflected(false),
+					card* reason_card_, uint8_t playerid_, uint32_t amount_, bool is_step_, uint8_t duelist_) :
+		Process(step_), reason_player(reason_player_), playerid(playerid_), duelist(duelist_), is_step(is_step_), is_reflected(false),
 		amount(amount_), reason(reason_), reason_card(reason_card_), reason_effect(reason_effect_) {}
 };
 struct Recover : public Process<false> {
 	uint8_t reason_player;
 	uint8_t playerid;
+	uint8_t duelist;
 	bool is_step;
 	uint32_t amount;
 	uint32_t reason;
 	effect* reason_effect;
 	Recover(uint16_t step_, effect* reason_effect_, uint32_t reason_, uint8_t reason_player_,
-					uint8_t playerid_, uint32_t amount_, bool is_step_) :
-		Process(step_), reason_player(reason_player_), playerid(playerid_), is_step(is_step_), amount(amount_),
+					uint8_t playerid_, uint32_t amount_, bool is_step_, uint8_t duelist_) :
+		Process(step_), reason_player(reason_player_), playerid(playerid_), duelist(duelist_), is_step(is_step_), amount(amount_),
 		reason(reason_), reason_effect(reason_effect_) {}
 };
 struct Equip : public Process<false> {

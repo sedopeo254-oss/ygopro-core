@@ -44,6 +44,7 @@ void card_state::set0xff() {
 	set_max_property_val(base_attack);
 	set_max_property_val(base_defense);
 	set_max_property_val(controler);
+	set_max_property_val(duelist);
 	set_max_property_val(location);
 	set_max_property_val(sequence);
 	set_max_property_val(position);
@@ -118,6 +119,10 @@ void insert_value(std::vector<uint8_t>& vec, const T& _val) {
 #define CHECK_AND_INSERT(query, value)CHECK_AND_INSERT_T(query, value, uint32_t)
 
 void card::get_infos(uint32_t query_flag) {
+	const auto ProtocolPosition = [this](const loc_info& info) {
+		return pduel->game_field->multiplayer.enabled()
+			? info.position | (static_cast<uint32_t>(info.duelist) << 24) : info.position;
+	};
 	CHECK_AND_INSERT(QUERY_CODE, data.code);
 	CHECK_AND_INSERT(QUERY_POSITION, get_info_location().position);
 	CHECK_AND_INSERT(QUERY_ALIAS, get_code());
@@ -140,7 +145,7 @@ void card::get_infos(uint32_t query_flag) {
 			insert_value<uint8_t>(pduel->query_buffer, info.controler);
 			insert_value<uint8_t>(pduel->query_buffer, info.location);
 			insert_value<uint32_t>(pduel->query_buffer, info.sequence);
-			insert_value<uint32_t>(pduel->query_buffer, info.position);
+			insert_value<uint32_t>(pduel->query_buffer, ProtocolPosition(info));
 		} else {
 			insert_value<uint16_t>(pduel->query_buffer, 0);
 			insert_value<uint64_t>(pduel->query_buffer, 0);
@@ -154,7 +159,7 @@ void card::get_infos(uint32_t query_flag) {
 			insert_value<uint8_t>(pduel->query_buffer, info.controler);
 			insert_value<uint8_t>(pduel->query_buffer, info.location);
 			insert_value<uint32_t>(pduel->query_buffer, info.sequence);
-			insert_value<uint32_t>(pduel->query_buffer, info.position);
+			insert_value<uint32_t>(pduel->query_buffer, ProtocolPosition(info));
 		} else {
 			insert_value<uint16_t>(pduel->query_buffer, 0);
 			insert_value<uint64_t>(pduel->query_buffer, 0);
@@ -169,7 +174,7 @@ void card::get_infos(uint32_t query_flag) {
 			insert_value<uint8_t>(pduel->query_buffer, info.controler);
 			insert_value<uint8_t>(pduel->query_buffer, info.location);
 			insert_value<uint32_t>(pduel->query_buffer, info.sequence);
-			insert_value<uint32_t>(pduel->query_buffer, info.position);
+			insert_value<uint32_t>(pduel->query_buffer, ProtocolPosition(info));
 		}
 	}
 	if(query_flag & QUERY_OVERLAY_CARD) {
@@ -221,9 +226,10 @@ int32_t card::is_related_to_chains() {
 #undef CHECK_AND_INSERT
 loc_info card::get_info_location() {
 	if(overlay_target) {
-		return { overlay_target->current.controler, (uint8_t)((overlay_target->current.location | LOCATION_OVERLAY) & 0xff), overlay_target->current.sequence, current.sequence };
+		return { overlay_target->current.controler, (uint8_t)((overlay_target->current.location | LOCATION_OVERLAY) & 0xff),
+			overlay_target->current.duelist, overlay_target->current.sequence, current.sequence };
 	} else {
-		return { current.controler, current.location , current.sequence, current.position };
+		return { current.controler, current.location, current.duelist, current.sequence, current.position };
 	}
 }
 // mapping of double-name cards
@@ -1283,7 +1289,7 @@ uint32_t card::get_linked_zone(bool free) {
 	if(!(get_type() & TYPE_LINK) || !(current.location & LOCATION_ONFIELD) || get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
 		return 0;
 	int32_t zones = 0;
-	int32_t s = current.sequence;
+	int32_t s = static_cast<int32_t>(pduel->game_field->get_local_sequence(current.controler, current.location, current.sequence));
 	int32_t location = current.location;
 	auto marker = get_link_marker();
 	if(location == LOCATION_MZONE) {
@@ -1385,7 +1391,7 @@ void card::get_linked_cards(card_set* cset, uint32_t zones) {
 		return;
 	int32_t p = current.controler;
 	uint32_t linked_zone = (zones) ? zones : get_linked_zone();
-	pduel->game_field->get_cards_in_zone(cset, linked_zone, p, LOCATION_ONFIELD);
+	pduel->game_field->get_cards_in_zone(cset, linked_zone, p, LOCATION_ONFIELD, current.duelist);
 	pduel->game_field->get_cards_in_zone(cset, linked_zone >> 16, 1 - p, LOCATION_ONFIELD);
 	for(auto it = cset->begin(); it != cset->end();) {
 		if((*it)->current.location == LOCATION_SZONE && !((*it)->get_type() & TYPE_LINK)) {
@@ -1407,7 +1413,8 @@ uint32_t card::get_mutual_linked_zone() {
 		uint32_t is_szone = pcard->current.location == LOCATION_SZONE ? 8 : 0;
 		uint32_t is_player = (current.controler == pcard->current.controler) ? 0 : 16;
 		if(is_mutual_linked(pcard, linked_zone, zone)) {
-			zones |= 1 << (pcard->current.sequence + is_szone + is_player);
+			const auto sequence = pduel->game_field->get_local_sequence(pcard->current.controler, pcard->current.location, pcard->current.sequence);
+			zones |= 1 << (sequence + is_szone + is_player);
 		}
 	}
 	return zones;
@@ -1418,7 +1425,7 @@ void card::get_mutual_linked_cards(card_set* cset) {
 		return;
 	int32_t p = current.controler;
 	uint32_t mutual_linked_zone = get_mutual_linked_zone();
-	pduel->game_field->get_cards_in_zone(cset, mutual_linked_zone, p, LOCATION_ONFIELD);
+	pduel->game_field->get_cards_in_zone(cset, mutual_linked_zone, p, LOCATION_ONFIELD, current.duelist);
 	pduel->game_field->get_cards_in_zone(cset, mutual_linked_zone >> 16, 1 - p, LOCATION_ONFIELD);
 }
 int32_t card::is_link_state() {
@@ -1431,7 +1438,8 @@ int32_t card::is_link_state() {
 	int32_t p = current.controler;
 	uint32_t is_szone = current.location == LOCATION_SZONE ? 8 : 0;
 	uint32_t linked_zone = pduel->game_field->get_linked_zone(p, false, true);
-	if((linked_zone >> (current.sequence + is_szone)) & 1)
+	const auto sequence = pduel->game_field->get_local_sequence(current.controler, current.location, current.sequence);
+	if((linked_zone >> (sequence + is_szone)) & 1)
 		return TRUE;
 	return FALSE;
 }
@@ -1441,18 +1449,21 @@ int32_t card::is_mutual_linked(card* pcard, uint32_t zones1, uint32_t zones2) {
 		zones1 = get_linked_zone();
 	uint32_t is_szone = pcard->current.location == LOCATION_SZONE ? 8 : 0;
 	uint32_t is_player = (current.controler == pcard->current.controler) ? 0 : 16;
-	if(zones1 & (1 << (pcard->current.sequence + is_szone + is_player))) {
+	const auto pcard_sequence = pduel->game_field->get_local_sequence(pcard->current.controler, pcard->current.location, pcard->current.sequence);
+	if(zones1 & (1 << (pcard_sequence + is_szone + is_player))) {
 		zones2 = zones2 ? zones2 : pcard->get_linked_zone();
 		is_szone = current.location == LOCATION_SZONE ? 8 : 0;
 		is_player = (current.controler == pcard->current.controler) ? 0 : 16;
-		ret = zones2 & (1 << (current.sequence + is_szone + is_player));
+		const auto sequence = pduel->game_field->get_local_sequence(current.controler, current.location, current.sequence);
+		ret = zones2 & (1 << (sequence + is_szone + is_player));
 	}
 	return ret;
 }
 int32_t card::is_extra_link_state() {
 	if(current.location != LOCATION_MZONE)
 		return FALSE;
-	uint32_t checked = (current.location == LOCATION_MZONE) ? (1u << current.sequence) : (1u << (current.sequence + 8));
+	const auto local_sequence = pduel->game_field->get_local_sequence(current.controler, current.location, current.sequence);
+	uint32_t checked = (current.location == LOCATION_MZONE) ? (1u << local_sequence) : (1u << (local_sequence + 8));
 	uint32_t linked_zone = get_mutual_linked_zone();
 	const auto& list_mzone0 = pduel->game_field->player[current.controler].list_mzone;
 	const auto& list_szone0 = pduel->game_field->player[current.controler].list_szone;
@@ -1493,7 +1504,7 @@ int32_t card::is_extra_link_state() {
 uint32_t card::get_column_zone(int32_t loc1, int32_t left, int32_t right) {
 	int32_t zones = 0;
 	int32_t loc2 = current.location;
-	int32_t seq = current.sequence;
+	int32_t seq = static_cast<int32_t>(pduel->game_field->get_local_sequence(current.controler, current.location, current.sequence));
 	if(!(loc1 & LOCATION_ONFIELD) || !(loc2 & LOCATION_ONFIELD) || left < 0 || right < 0)
 		return 0;
 	if(loc2 & LOCATION_SZONE && seq >= 5)
@@ -1502,7 +1513,7 @@ uint32_t card::get_column_zone(int32_t loc1, int32_t left, int32_t right) {
 		seq = (seq == 5) ? 1 : 3;
 	int32_t seq1 = seq - left < 0 ? 0 : seq - left;
 	int32_t seq2 = seq + right > 4 ? 4 : seq + right;
-	auto chkextra = [seq = current.sequence, mzone = (current.location == LOCATION_MZONE)](uint8_t s)->bool { 
+	auto chkextra = [seq, mzone = (current.location == LOCATION_MZONE)](uint8_t s)->bool {
 		return !mzone || seq < 5 || seq != s;
 	};
 	if (loc1 & LOCATION_MZONE) {
@@ -1520,7 +1531,7 @@ uint32_t card::get_column_zone(int32_t loc1, int32_t left, int32_t right) {
 		for (int32_t s = seq1; s <= seq2; ++s)
 			zones |= (1u << (8 + s)) | (1u << (16 + 8 + (4 - s)));
 	}
-	zones &= ~((1 << current.sequence) << ((loc2 == LOCATION_SZONE) ? 8 : 0));
+	zones &= ~((1 << seq) << ((loc2 == LOCATION_SZONE) ? 8 : 0));
 	return zones;
 }
 void card::get_column_cards(card_set* cset, int32_t left, int32_t right) {
@@ -1529,7 +1540,7 @@ void card::get_column_cards(card_set* cset, int32_t left, int32_t right) {
 		return;
 	int32_t p = current.controler;
 	uint32_t column_zone = get_column_zone(LOCATION_ONFIELD, left, right);
-	pduel->game_field->get_cards_in_zone(cset, column_zone, p, LOCATION_ONFIELD);
+	pduel->game_field->get_cards_in_zone(cset, column_zone, p, LOCATION_ONFIELD, current.duelist);
 	pduel->game_field->get_cards_in_zone(cset, column_zone >> 16, 1 - p, LOCATION_ONFIELD);
 }
 int32_t card::is_all_column() {
@@ -1538,7 +1549,8 @@ int32_t card::is_all_column() {
 	card_set cset;
 	get_column_cards(&cset, 0, 0);
 	uint32_t full = 3;
-	if(pduel->game_field->is_flag(DUEL_EMZONE) && (current.sequence == 1 || current.sequence == 3))
+	const auto sequence = pduel->game_field->get_local_sequence(current.controler, current.location, current.sequence);
+	if(pduel->game_field->is_flag(DUEL_EMZONE) && (sequence == 1 || sequence == 3))
 		++full;
 	if(cset.size() == full)
 		return TRUE;

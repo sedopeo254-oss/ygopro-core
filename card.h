@@ -26,6 +26,7 @@ struct chain;
 struct loc_info {
 	uint8_t controler;
 	uint8_t location;
+	uint8_t duelist;
 	uint32_t sequence;
 	uint32_t position;
 };
@@ -48,6 +49,9 @@ struct card_state {
 	int32_t base_attack{};
 	int32_t base_defense{};
 	uint8_t controler{};
+	// Logical seat inside a multiplayer field side. `controler` intentionally
+	// remains the two-sided Lua/API player id.
+	uint8_t duelist{};
 	uint8_t location{};
 	uint32_t sequence{};
 	uint32_t position{};
@@ -60,13 +64,15 @@ struct card_state {
 	static bool is_location(const T& loc_info, uint16_t loc) {
 		if(loc_info.location & static_cast<uint8_t>(loc))
 			return true;
-		if((loc & LOCATION_EMZONE) && loc_info.location == LOCATION_MZONE && loc_info.sequence >= 5)
+		const auto local_sequence = loc_info.location == LOCATION_MZONE ? loc_info.sequence % 7
+			: loc_info.location == LOCATION_SZONE ? loc_info.sequence % 8 : loc_info.sequence;
+		if((loc & LOCATION_EMZONE) && loc_info.location == LOCATION_MZONE && local_sequence >= 5)
 			return true;
-		if((loc & LOCATION_MMZONE) && loc_info.location == LOCATION_MZONE && loc_info.sequence < 5)
+		if((loc & LOCATION_MMZONE) && loc_info.location == LOCATION_MZONE && local_sequence < 5)
 			return true;
-		if((loc & LOCATION_STZONE) && loc_info.location == LOCATION_SZONE && loc_info.sequence < 5)
+		if((loc & LOCATION_STZONE) && loc_info.location == LOCATION_SZONE && local_sequence < 5)
 			return true;
-		if((loc & LOCATION_FZONE) && loc_info.location == LOCATION_SZONE && loc_info.sequence == 5)
+		if((loc & LOCATION_FZONE) && loc_info.location == LOCATION_SZONE && local_sequence == 5)
 			return true;
 		if((loc & LOCATION_PZONE) && loc_info.location == LOCATION_SZONE && loc_info.pzone)
 			return true;
@@ -118,6 +124,7 @@ public:
 	card_state temp{};
 	card_state current{};
 	uint8_t owner{ PLAYER_NONE };
+	uint8_t owner_duelist{};
 	struct summon_info {
 		uint32_t type{};
 		uint8_t player{};
@@ -399,4 +406,3 @@ public:
 #define CARD_TWINKLE_MOSS   13857930
 
 #endif /* CARD_H_ */
-

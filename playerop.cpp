@@ -366,7 +366,7 @@ bool field::process(Processors::SelectCardCodes& arg) {
 		message->write<uint32_t>((uint32_t)core.select_cards_codes.size());
 		for(const auto& obj : core.select_cards_codes) {
 			message->write<uint32_t>(obj.first);
-			message->write(loc_info{ playerid, 0, 0, 0 });
+			message->write(loc_info{ playerid, 0, 0, 0, 0 });
 		}
 		return FALSE;
 	} else {

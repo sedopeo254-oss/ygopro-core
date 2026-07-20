@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022-2024, Edoardo Lolletti (edo9300) <edoardo762@gmail.com>
+ * Copyright (c) 2022-2026, Edoardo Lolletti (edo9300) <edoardo762@gmail.com>
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
@@ -9,6 +9,10 @@
 #define MAKE_LUA_NAME_IMPL(module, name) c_lua_##module##_##name
 #define MAKE_LUA_NAME(module, name) MAKE_LUA_NAME_IMPL(module, name)
 
+// in clang 22, the usage of the __COUNTER__ macro is now diagnosed as c2y extension and a warning is raised
+#if (defined(__clang__) && __clang_major__ >= 22)
+#pragma GCC diagnostic ignored "-Wc2y-extensions"
+#endif
 // if subsequent calls to __COUNTER__ don't produce consecutive integers, that macro is broken
 #if !defined(__COUNTER__) || (__COUNTER__ + 0 != __COUNTER__ - 1)
 #define HAS_COUNTER 0
@@ -32,7 +36,10 @@
 #define LUA_INLINE ForceInline
 #endif
 
+#define LUA_NAMESPACE
+
 namespace {
+namespace LUA_NAMESPACE {
 namespace Detail {
 
 template<std::size_t N>
@@ -115,10 +122,11 @@ constexpr auto make_lua_functions_array() {
 #endif
 
 } // namespace Detail
+} // namespace LUA_NAMESPACE
 } // namespace
 
 #define GET_LUA_FUNCTIONS_ARRAY() \
-	Detail::make_lua_functions_array<COUNTER_MACRO>()
+	LUA_NAMESPACE::Detail::make_lua_functions_array<COUNTER_MACRO>()
 
 #define LUA_STATIC_FUNCTION(name) LUA_STATIC_FUNCTION_INT(name, COUNTER_MACRO)
 

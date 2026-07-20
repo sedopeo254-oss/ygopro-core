@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 #include <algorithm> //std::sort, std::swap, std::find, std::find_if, std::min, std::none_of
-#include <cstring> //std::memcmp
+#include <tuple> //std::tie
 #include <utility> //std::move
 #include <vector>
 #include "card.h"
@@ -43,6 +43,9 @@ void chain::set_triggering_state(card* pcard) {
 	triggering_state.code2 = pcard->get_another_code();
 	triggering_state.level = pcard->get_level();
 	triggering_state.rank = pcard->get_rank();
+	triggering_state.link = pcard->get_link();
+	triggering_state.lscale = pcard->get_lscale();
+	triggering_state.rscale = pcard->get_rscale();
 	triggering_state.attribute = pcard->get_attribute();
 	triggering_state.type = pcard->get_type();
 	triggering_state.race = pcard->get_race();
@@ -53,8 +56,13 @@ void chain::set_triggering_state(card* pcard) {
 	setcode.clear();
 	pcard->get_set_card(setcode);
 }
-bool tevent::operator< (const tevent& v) const {
-	return std::memcmp(this, &v, sizeof(tevent)) < 0;
+bool tevent::operator< (const tevent& rhs) const {
+	return std::tie(trigger_card, event_cards, reason_effect,
+					event_code, event_value, reason,
+					event_player, reason_player, global_id) <
+		std::tie(rhs.trigger_card, rhs.event_cards, rhs.reason_effect,
+				 rhs.event_code, rhs.event_value, rhs.reason,
+				 rhs.event_player, rhs.reason_player, rhs.global_id);
 }
 field::field(duel* _pduel, const OCG_DuelOptions& options) :pduel(_pduel), player({ {options.team1, options.team2} }) {
 	core.duel_options = options.flags;
@@ -143,7 +151,8 @@ void field::add_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t se
 		return;
 	if (!is_location_useable(playerid, location, sequence))
 		return;
-	if(pcard->is_extra_deck_monster()) {
+	// explicitly allow fusion spell cards to start in the extra
+	if(pcard->is_extra_deck_monster() || (pcard->data.type & TYPE_FUSION) != 0) {
 		if(location & (LOCATION_HAND | LOCATION_DECK)) {
 			location = LOCATION_EXTRA;
 			pcard->sendto_param.position = POS_FACEDOWN_DEFENSE;
@@ -610,6 +619,32 @@ card* field::get_field_card(uint32_t playerid, uint32_t location, uint32_t seque
 	}
 	}
 	return nullptr;
+}
+int32_t field::is_field_location_valid(uint32_t location, uint32_t sequence) {
+	if(location == LOCATION_EMZONE) {
+		sequence += 5;
+		location = LOCATION_MZONE;
+	}
+	if(location == LOCATION_MMZONE) {
+		location = LOCATION_MZONE;
+		sequence += 1 * is_flag(DUEL_3_COLUMNS_FIELD);
+	}
+	if(location == LOCATION_STZONE) {
+		location = LOCATION_SZONE;
+		sequence += 1 * is_flag(DUEL_3_COLUMNS_FIELD);
+	}
+	if((location & LOCATION_ONFIELD) == 0)
+		return TRUE;
+	if(location == LOCATION_MZONE) {
+		return sequence < 7;
+	} else if(location == LOCATION_SZONE) {
+		return sequence < 8;
+	} else if(location == LOCATION_FZONE) {
+		return sequence < 2;
+	} else if(location == LOCATION_PZONE) {
+		return sequence < 3;
+	}
+	return TRUE;
 }
 // return: the given slot in LOCATION_MZONE or all LOCATION_SZONE is available or not
 int32_t field::is_location_useable(uint32_t playerid, uint32_t location, uint32_t sequence) {
@@ -1441,7 +1476,7 @@ void field::remove_oath_effect(effect* reason_effect) {
 void field::release_oath_relation(effect* reason_effect) {
 	for(auto& oeit : effects.oath)
 		if(oeit.second == reason_effect)
-			oeit.second = 0;
+			oeit.second = nullptr;
 }
 void field::reset_phase(uint32_t phase) {
 	for(auto eit = effects.pheff.begin(); eit != effects.pheff.end();) {
@@ -2050,12 +2085,16 @@ void field::get_fusion_material(uint8_t playerid, card_set* material) {
 		if(pcard->is_affected_by_effect(EFFECT_EXTRA_FUSION_MATERIAL))
 			material->insert(pcard);
 }
-void field::ritual_release(const card_set& material) {
+void field::ritual_release(const card_set& material, bool release_deck) {
 	card_set rel, rem, tograve;
+	uint32_t to_grave_types = LOCATION_OVERLAY | LOCATION_EXTRA;
+	if(!release_deck) {
+		to_grave_types |= LOCATION_DECK;
+	}
 	for(auto& pcard : material) {
 		if(pcard->current.location == LOCATION_GRAVE)
 			rem.insert(pcard);
-		else if((pcard->current.location & (LOCATION_OVERLAY | LOCATION_EXTRA | LOCATION_DECK)) != 0)
+		else if((pcard->current.location & to_grave_types) != 0)
 			tograve.insert(pcard);
 		else
 			rel.insert(pcard);
@@ -2771,8 +2810,11 @@ int32_t field::is_player_can_summon(uint32_t sumtype, uint8_t playerid, card* pc
 	eset.clear();
 	filter_player_effect(playerid, EFFECT_FORCE_NORMAL_SUMMON_POSITION, &eset);
 	uint8_t sumpos = POS_FACEUP_ATTACK;
-	if(is_flag(DUEL_NORMAL_SUMMON_FACEUP_DEF) || is_player_affected_by_effect(playerid, EFFECT_DEVINE_LIGHT))
+	if(is_flag(DUEL_NORMAL_SUMMON_FACEUP_DEF)
+	   || is_player_affected_by_effect(playerid, EFFECT_NORMAL_SUMMON_FACEUP_DEFENSE)
+	   || is_player_affected_by_effect(playerid, EFFECT_DEVINE_LIGHT)) {
 		sumpos = POS_FACEUP;
+	}
 	for(auto& eff : eset) {
 		if(eff->target) {
 			pduel->lua->add_param<LuaParam::EFFECT>(eff);
@@ -2994,7 +3036,7 @@ int32_t field::is_player_can_remove_overlay_card(uint8_t playerid, group* pgroup
 	}
 	return FALSE;
 }
-int32_t field::is_player_can_send_to_grave(uint8_t playerid, card* pcard) {
+int32_t field::is_player_can_send_to_grave(uint8_t playerid, card* pcard, uint32_t reason) {
 	effect_set eset;
 	filter_player_effect(playerid, EFFECT_CANNOT_TO_GRAVE, &eset);
 	for(const auto& peff : eset) {
@@ -3003,7 +3045,8 @@ int32_t field::is_player_can_send_to_grave(uint8_t playerid, card* pcard) {
 		pduel->lua->add_param<LuaParam::EFFECT>(peff);
 		pduel->lua->add_param<LuaParam::CARD>(pcard);
 		pduel->lua->add_param<LuaParam::INT>(playerid);
-		if (pduel->lua->check_condition(peff->target, 3))
+		pduel->lua->add_param<LuaParam::INT>(reason);
+		if (pduel->lua->check_condition(peff->target, 4))
 			return FALSE;
 	}
 	return TRUE;

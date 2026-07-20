@@ -201,10 +201,6 @@ public:
 	uint32_t get_code();
 	uint32_t get_another_code();
 	void get_summon_code(std::set<uint32_t>& codes, card* scard = nullptr, uint64_t sumtype = 0, uint8_t playerid = 2);
-	int32_t is_set_card(uint16_t set_code);
-	int32_t is_origin_set_card(uint16_t set_code);
-	int32_t is_pre_set_card(uint16_t set_code);
-	int32_t is_summon_set_card(uint16_t set_code, card* scard = nullptr, uint64_t sumtype = 0, uint8_t playerid = 2);
 	void get_set_card(std::set<uint16_t>& setcodes);
 	const std::set<uint16_t>& get_origin_set_card() const { return data.setcodes; }
 	void get_pre_set_card(std::set<uint16_t>& setcodes);
@@ -345,7 +341,7 @@ public:
 	int32_t is_releasable_by_summon(uint8_t playerid, card* pcard);
 	int32_t is_releasable_by_nonsummon(uint8_t playerid, uint32_t reason);
 	int32_t is_releasable_by_effect(uint8_t playerid, effect* peffect);
-	int32_t is_capable_send_to_grave(uint8_t playerid);
+	int32_t is_capable_send_to_grave(uint8_t playerid, uint32_t reason);
 	int32_t is_capable_send_to_hand(uint8_t playerid);
 	int32_t is_capable_send_to_deck(uint8_t playerid);
 	int32_t is_capable_send_to_extra(uint8_t playerid);

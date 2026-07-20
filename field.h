@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2010-2015, Argon Sun (Fluorohydride)
- * Copyright (c) 2017-2025, Edoardo Lolletti (edo9300) <edoardo762@gmail.com>
+ * Copyright (c) 2017-2026, Edoardo Lolletti (edo9300) <edoardo762@gmail.com>
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
@@ -20,6 +20,7 @@
 #include "card.h"
 #include "common.h"
 #include "containers_fwd.h"
+#include "lua_obj.h"
 #include "processor_unit.h"
 #include "multiplayer.h"
 #include "progressivebuffer.h"
@@ -29,25 +30,25 @@ class group;
 class effect;
 
 struct tevent {
-	card* trigger_card;
-	group* event_cards;
-	effect* reason_effect;
-	uint32_t event_code;
-	uint32_t event_value;
-	uint32_t reason;
-	uint8_t event_player;
-	uint8_t reason_player;
-	uint32_t global_id;
+	card* trigger_card{};
+	owned_lua<group> event_cards;
+	effect* reason_effect{};
+	uint32_t event_code{};
+	uint32_t event_value{};
+	uint32_t reason{};
+	uint8_t event_player{};
+	uint8_t reason_player{};
+	uint32_t global_id{};
 	bool operator< (const tevent& v) const;
 };
 struct optarget {
-	group* op_cards;
+	owned_lua<group> op_cards;
 	uint8_t op_count;
 	uint8_t op_player;
 	int32_t op_param;
 };
 struct chain {
-	using opmap = std::unordered_map<uint32_t, optarget>;
+	using opmap = std::unordered_map<uint64_t, optarget>;
 	using applied_chain_counter_t = std::vector<uint32_t>;
 	card_state triggering_state;
 	tevent evt;
@@ -70,7 +71,7 @@ struct chain {
 	uint32_t flag;
 	uint32_t event_id;
 	effect* triggering_effect;
-	group* target_cards;
+	owned_lua<group> target_cards;
 	effect* disable_reason;
 	applied_chain_counter_t* applied_chain_counters;
 	opmap opinfos;
@@ -315,8 +316,8 @@ struct processor {
 	bool set_forced_attack;
 	card* forced_attacker;
 	card* forced_attack_target;
-	group* must_use_mats;
-	group* only_use_mats;
+	owned_lua<group> must_use_mats;
+	owned_lua<group> only_use_mats;
 	int32_t forced_summon_minc;
 	int32_t forced_summon_maxc;
 	bool attack_cancelable;
@@ -433,6 +434,7 @@ public:
 	void swap_card(card* pcard1, card* pcard2);
 	void set_control(card* pcard, uint8_t playerid, uint16_t reset_phase, uint8_t reset_count);
 	card* get_field_card(uint32_t playerid, uint32_t location, uint32_t sequence);
+	int32_t is_field_location_valid(uint32_t location, uint32_t sequence);
 	int32_t is_location_useable(uint32_t playerid, uint32_t location, uint32_t sequence);
 	int32_t get_useable_count(card* pcard, uint8_t playerid, uint8_t location, uint8_t uplayer, uint32_t reason, uint32_t zone = 0xff, uint32_t* list = nullptr);
 	int32_t get_useable_count_fromex(card* pcard, uint8_t playerid, uint8_t uplayer, uint32_t zone = 0xff, uint32_t* list = nullptr);
@@ -493,7 +495,7 @@ public:
 	int32_t get_draw_count(uint8_t playerid);
 	void get_ritual_material(uint8_t playerid, effect* peffect, card_set* material, bool check_level);
 	void get_fusion_material(uint8_t playerid, card_set* material);
-	void ritual_release(const card_set& material);
+	void ritual_release(const card_set& material, bool release_deck);
 	void get_overlay_group(uint8_t playerid, uint8_t self, uint8_t oppo, card_set* pset, group* pgroup);
 	int32_t get_overlay_count(uint8_t playerid, uint8_t self, uint8_t oppo, group* pgroup);
 	void update_disable_check_list(effect* peffect);
@@ -547,7 +549,7 @@ public:
 	int32_t is_player_can_place_counter(uint8_t playerid, card* pcard, uint16_t countertype, uint16_t count);
 	int32_t is_player_can_remove_counter(uint8_t playerid, card* pcard, uint8_t self, uint8_t oppo, uint16_t countertype, uint16_t count, uint32_t reason);
 	int32_t is_player_can_remove_overlay_card(uint8_t playerid, group* pcard, uint8_t self, uint8_t oppo, uint16_t count, uint32_t reason);
-	int32_t is_player_can_send_to_grave(uint8_t playerid, card* pcard);
+	int32_t is_player_can_send_to_grave(uint8_t playerid, card* pcard, uint32_t reason);
 	int32_t is_player_can_send_to_hand(uint8_t playerid, card* pcard);
 	int32_t is_player_can_send_to_deck(uint8_t playerid, card* pcard);
 	int32_t is_player_can_remove(uint8_t playerid, card* pcard, uint32_t reason);
@@ -761,6 +763,9 @@ enum class CHAININFO {
 	TRIGGERING_SUMMON_TYPE,
 	TRIGGERING_SUMMON_PROC_COMPLETE,
 	TRIGGERING_SETCODES,
+	TRIGGERING_LINK,
+	TRIGGERING_LSCALE,
+	TRIGGERING_RSCALE,
 };
 
 //Timing

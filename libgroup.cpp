@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2010-2015, Argon Sun (Fluorohydride)
- * Copyright (c) 2017-2024, Edoardo Lolletti (edo9300) <edoardo762@gmail.com>
+ * Copyright (c) 2017-2025, Edoardo Lolletti (edo9300) <edoardo762@gmail.com>
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
@@ -17,21 +17,22 @@
 #include "scriptlib.h"
 
 #define LUA_MODULE Group
-using LUA_CLASS = group;
+#define LUA_CLASS group
 #include "function_array_helper.h"
 
 namespace {
+namespace LUA_NAMESPACE {
 
 using namespace scriptlib;
 
 void assert_readonly_group(lua_State* L, group* pgroup) {
-	if(pgroup->is_readonly != 1)
+	if(!pgroup->is_readonly)
 		return;
 	lua_error(L, "attempt to modify a read only group");
 }
 
 LUA_STATIC_FUNCTION(CreateGroup) {
-	group* pgroup = pduel->new_group();
+	auto pgroup = pduel->new_group();
 	lua_iterate_table_or_stack(L, 1, lua_gettop(L), [L, &container = pgroup->container] {
 		if(!lua_isnil(L, -1)) {
 			auto pcard = lua_get<card*, true>(L, -1);
@@ -43,22 +44,14 @@ LUA_STATIC_FUNCTION(CreateGroup) {
 }
 LUA_FUNCTION_ALIAS(FromCards);
 LUA_FUNCTION(Clone) {
-	group* newgroup = pduel->new_group(self);
+	auto newgroup = pduel->new_group(self);
 	interpreter::pushobject(L, newgroup);
 	return 1;
 }
 LUA_FUNCTION(DeleteGroup) {
-	if(self->is_readonly != 2)
-		return 0;
-	self->is_readonly = 0;
-	pduel->sgroups.insert(self);
 	return 0;
 }
 LUA_FUNCTION(KeepAlive) {
-	if(self->is_readonly != 1) {
-		self->is_readonly = 2;
-		pduel->sgroups.erase(self);
-	}
 	interpreter::pushobject(L, self);
 	return 1;
 }
@@ -140,7 +133,7 @@ LUA_FUNCTION(Filter) {
 		for(auto& pcard : pexgroup->container)
 			cset.erase(pcard);
 	}
-	group* new_group = pduel->new_group();
+	auto new_group = pduel->new_group();
 	uint32_t extraargs = lua_gettop(L) - 3;
 	for(auto& pcard : cset) {
 		if(pduel->lua->check_matching(pcard, findex, extraargs)) {
@@ -313,7 +306,7 @@ LUA_FUNCTION(RandomSelect) {
 	check_param_count(L, 3);
 	auto playerid = lua_get<uint8_t>(L, 2);
 	size_t count = lua_get<uint32_t>(L, 3);
-	group* newgroup = pduel->new_group();
+	auto newgroup = pduel->new_group();
 	if(count > self->container.size())
 		count = self->container.size();
 	if(count == 0) {
@@ -382,8 +375,11 @@ LUA_FUNCTION(CheckWithSumEqual) {
 			cv.push_back(pcard);
 	}
 	pduel->game_field->core.must_select_cards.clear();
-	for(auto& pcard : cv)
-		pcard->sum_param = pduel->lua->get_operation_value(pcard, findex, extraargs);
+	for(auto& pcard : cv) {
+		if(pcard->sum_param = pduel->lua->get_operation_value(pcard, findex, extraargs); pcard->sum_param == 0) {
+			lua_error(L, "Group contains a card for which the value function returned 0.");
+		}
+	}
 	int32_t should_continue = TRUE;
 	lua_pushboolean(L, field::check_with_sum_limit_m(cv, acc, 0, min, max, mcount, &should_continue));
 	lua_pushboolean(L, should_continue);
@@ -412,17 +408,20 @@ LUA_FUNCTION(SelectWithSumEqual) {
 	card_vector cv(pduel->game_field->core.must_select_cards);
 	int32_t mcount = static_cast<int32_t>(cv.size());
 	cv.insert(cv.end(), pduel->game_field->core.select_cards.begin(), pduel->game_field->core.select_cards.end());
-	for(auto& pcard : cv)
-		pcard->sum_param = pduel->lua->get_operation_value(pcard, findex, extraargs);
+	for(auto& pcard : cv) {
+		if(pcard->sum_param = pduel->lua->get_operation_value(pcard, findex, extraargs); pcard->sum_param == 0) {
+			lua_error(L, "Group contains a card for which the value function returned 0.");
+		}
+	}
 	if(!field::check_with_sum_limit_m(cv, acc, 0, min, max, mcount, nullptr)) {
 		pduel->game_field->core.must_select_cards.clear();
-		group* empty_group = pduel->new_group();
+		auto empty_group = pduel->new_group();
 		interpreter::pushobject(L, empty_group);
 		return 1;
 	}
 	pduel->game_field->emplace_process<Processors::SelectSum>(playerid, acc, min, max);
 	return yieldk({
-		group* pgroup = pduel->new_group(pduel->game_field->return_cards.list);
+		auto pgroup = pduel->new_group(pduel->game_field->return_cards.list);
 		pduel->game_field->core.must_select_cards.clear();
 		interpreter::pushobject(L, pgroup);
 		return 1;
@@ -442,8 +441,11 @@ LUA_FUNCTION(CheckWithSumGreater) {
 			cv.push_back(pcard);
 	}
 	pduel->game_field->core.must_select_cards.clear();
-	for(auto& pcard : cv)
-		pcard->sum_param = pduel->lua->get_operation_value(pcard, findex, extraargs);
+	for(auto& pcard : cv) {
+		if(pcard->sum_param = pduel->lua->get_operation_value(pcard, findex, extraargs); pcard->sum_param == 0) {
+			lua_error(L, "Group contains a card for which the value function returned 0.");
+		}
+	}
 	int32_t should_continue = TRUE;
 	lua_pushboolean(L, field::check_with_sum_greater_limit_m(cv, acc, 0, 0xffff, mcount, &should_continue));
 	lua_pushboolean(L, should_continue);
@@ -466,17 +468,20 @@ LUA_FUNCTION(SelectWithSumGreater) {
 	card_vector cv(pduel->game_field->core.must_select_cards);
 	int32_t mcount = static_cast<int32_t>(cv.size());
 	cv.insert(cv.end(), pduel->game_field->core.select_cards.begin(), pduel->game_field->core.select_cards.end());
-	for(auto& pcard : cv)
-		pcard->sum_param = pduel->lua->get_operation_value(pcard, findex, extraargs);
+	for(auto& pcard : cv) {
+		if(pcard->sum_param = pduel->lua->get_operation_value(pcard, findex, extraargs); pcard->sum_param == 0) {
+			lua_error(L, "Group contains a card for which the value function returned 0.");
+		}
+	}
 	if(!field::check_with_sum_greater_limit_m(cv, acc, 0, 0xffff, mcount, nullptr)) {
 		pduel->game_field->core.must_select_cards.clear();
-		group* empty_group = pduel->new_group();
+		auto empty_group = pduel->new_group();
 		interpreter::pushobject(L, empty_group);
 		return 1;
 	}
 	pduel->game_field->emplace_process<Processors::SelectSum>(playerid, acc, 0, 0);
 	return yieldk({
-		group* pgroup = pduel->new_group(pduel->game_field->return_cards.list);
+		auto pgroup = pduel->new_group(pduel->game_field->return_cards.list);
 		pduel->game_field->core.must_select_cards.clear();
 		interpreter::pushobject(L, pgroup);
 		return 1;
@@ -487,7 +492,7 @@ LUA_FUNCTION(GetMinGroup) {
 	const auto findex = lua_get<function, true>(L, 2);
 	if(self->container.size() == 0)
 		return 0;
-	group* newgroup = pduel->new_group();
+	auto newgroup = pduel->new_group();
 	int64_t min, op;
 	int32_t extraargs = lua_gettop(L) - 2;
 	auto cit = self->container.begin();
@@ -513,7 +518,7 @@ LUA_FUNCTION(GetMaxGroup) {
 	const auto findex = lua_get<function, true>(L, 2);
 	if(self->container.size() == 0)
 		return 0;
-	group* newgroup = pduel->new_group();
+	auto newgroup = pduel->new_group();
 	int64_t max, op;
 	int32_t extraargs = lua_gettop(L) - 2;
 	auto cit = self->container.begin();
@@ -657,8 +662,9 @@ std::tuple<group*, group*, card*> get_binary_op_group_card_parameters(lua_State*
 }
 LUA_STATIC_FUNCTION(__band) {
 	check_param_count(L, 2);
+	auto [pgroup1, pgroup2, pcard] = get_binary_op_group_card_parameters(L);
 	card_set cset;
-	if(auto [pgroup1, pgroup2, pcard] = get_binary_op_group_card_parameters(L); pcard) {
+	if(pcard) {
 		if(pgroup1->has_card(pcard)) {
 			cset.insert(pcard);
 		}
@@ -672,7 +678,7 @@ LUA_STATIC_FUNCTION(__band) {
 LUA_STATIC_FUNCTION(__add) {
 	check_param_count(L, 2);
 	auto [pgroup1, pgroup2, pcard] = get_binary_op_group_card_parameters(L);
-	group* newgroup = pduel->new_group(pgroup1);
+	auto newgroup = pduel->new_group(pgroup1);
 	if(pcard) {
 		newgroup->container.insert(pcard);
 	} else {
@@ -684,7 +690,7 @@ LUA_STATIC_FUNCTION(__add) {
 LUA_FUNCTION(__sub) {
 	check_param_count(L, 2);
 	auto [pcard, pgroup] = lua_get_card_or_group(L, 2);
-	group* newgroup = pduel->new_group(self);
+	auto newgroup = pduel->new_group(self);
 	if(pgroup) {
 		for(auto& _pcard : pgroup->container)
 			newgroup->container.erase(_pcard);
@@ -719,6 +725,10 @@ LUA_FUNCTION(__le) {
 	check_param_count(L, 2);
 	auto sgroup = lua_get<group*, true>(L, 2);
 	lua_pushboolean(L, self->container.size() <= sgroup->container.size());
+	return 1;
+}
+LUA_FUNCTION(__gc) {
+	pduel->delete_group(self);
 	return 1;
 }
 LUA_FUNCTION(IsContains) {
@@ -790,6 +800,7 @@ LUA_FUNCTION(GetBinClassCount) {
 LUA_FUNCTION_EXISTING(GetLuaRef, get_lua_ref<group>);
 LUA_FUNCTION_EXISTING(FromLuaRef, from_lua_ref<group>);
 LUA_FUNCTION_EXISTING(IsDeleted, is_deleted_object);
+}
 }
 
 void scriptlib::push_group_lib(lua_State* L) {

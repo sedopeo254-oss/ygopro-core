@@ -243,11 +243,15 @@ struct BattleCommand : public Process<false> {
 	card* reason_card;
 	std::multimap<effect*, card*> must_attack_map;
 	std::vector<uint8_t> attack_target_duelists;
+	std::vector<uint8_t> attack_interceptors;
+	size_t attack_interceptor_index;
+	bool interception_offered;
 	BattleCommand(uint16_t step_, owned_lua<group> cards_destroyed_by_battle_ = nullptr, bool forced_attack_ = false) :
 		Process(step_), phase_to_change_to(0), forced_attack(forced_attack_), forced_attack_done(false), is_replaying_attack(false), attack_announce_failed(false),
 		repeat_battle_phase(false), second_battle_phase_is_optional(false),
 		previous_point_event_had_any_trigger_to_resolve(false), reason_player(PLAYER_NONE), damage_change_effect(nullptr),
-		cards_destroyed_by_battle(cards_destroyed_by_battle_), reason_card(nullptr) {}
+		cards_destroyed_by_battle(cards_destroyed_by_battle_), reason_card(nullptr),
+		attack_interceptor_index(0), interception_offered(false) {}
 };
 struct DamageStep : public Process<false> {
 	uint16_t backup_phase;
@@ -525,10 +529,14 @@ struct Damage : public Process<false> {
 	uint32_t reason;
 	card* reason_card;
 	effect* reason_effect;
+	std::vector<uint8_t> interceptors;
+	size_t interceptor_index;
+	bool interception_offered;
 	Damage(uint16_t step_, effect* reason_effect_, uint32_t reason_, uint8_t reason_player_,
 					card* reason_card_, uint8_t playerid_, uint32_t amount_, bool is_step_, uint8_t duelist_) :
 		Process(step_), reason_player(reason_player_), playerid(playerid_), duelist(duelist_), is_step(is_step_), is_reflected(false),
-		amount(amount_), reason(reason_), reason_card(reason_card_), reason_effect(reason_effect_) {}
+		amount(amount_), reason(reason_), reason_card(reason_card_), reason_effect(reason_effect_),
+		interceptor_index(0), interception_offered(false) {}
 };
 struct Recover : public Process<false> {
 	uint8_t reason_player;

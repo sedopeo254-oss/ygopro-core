@@ -1799,6 +1799,9 @@ bool field::process(Processors::BattleCommand& arg) {
 		core.attack_target = nullptr;
 		core.attack_target_duelist = 0xff;
 		arg.attack_target_duelists.clear();
+		arg.attack_interceptors.clear();
+		arg.attack_interceptor_index = 0;
+		arg.interception_offered = false;
 		if(auto peffect = is_player_affected_by_effect(infos.turn_player, EFFECT_SKIP_BP); peffect != nullptr || core.force_turn_end) {
 			arg.step = 41;
 			arg.phase_to_change_to = 2;
@@ -2027,6 +2030,25 @@ bool field::process(Processors::BattleCommand& arg) {
 				&& arg.attack_target_duelists.size() > 1) {
 			const auto selected = static_cast<size_t>(returns.at<int32_t>(0));
 			core.attack_target_duelist = arg.attack_target_duelists[selected];
+		}
+		arg.attack_target_duelists.clear();
+		if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1
+				&& !arg.interception_offered) {
+			arg.interception_offered = true;
+			arg.attack_interceptors.clear();
+			for(uint8_t logical_player = 0; logical_player < 3; ++logical_player) {
+				if(!multiplayer.is_active(logical_player)
+						|| multiplayer.duelist_index_of(logical_player) == core.attack_target_duelist)
+					continue;
+				arg.attack_interceptors.push_back(logical_player);
+			}
+			if(!arg.attack_interceptors.empty()) {
+				arg.attack_interceptor_index = 0;
+				const auto logical_player = arg.attack_interceptors.front();
+				emplace_process<Processors::SelectYesNo>(static_cast<uint8_t>(logical_player + 2), MULTIPLAYER_TAKE_ATTACK_DESC);
+				arg.step = 43;
+				return FALSE;
+			}
 		}
 		core.attack_player = FALSE;
 		core.select_cards.clear();
@@ -2813,6 +2835,23 @@ bool field::process(Processors::BattleCommand& arg) {
 		returns.set<int32_t>(0, arg.phase_to_change_to);
 		returns.set<int32_t>(1, bp_twice);
 		return TRUE;
+	}
+	case 44: {
+		if(returns.at<int32_t>(0)) {
+			const auto logical_player = arg.attack_interceptors[arg.attack_interceptor_index];
+			core.attack_target_duelist = multiplayer.duelist_index_of(logical_player);
+			arg.step = 3;
+			return FALSE;
+		}
+		++arg.attack_interceptor_index;
+		if(arg.attack_interceptor_index < arg.attack_interceptors.size()) {
+			const auto logical_player = arg.attack_interceptors[arg.attack_interceptor_index];
+			emplace_process<Processors::SelectYesNo>(static_cast<uint8_t>(logical_player + 2), MULTIPLAYER_TAKE_ATTACK_DESC);
+			arg.step = 43;
+			return FALSE;
+		}
+		arg.step = 3;
+		return FALSE;
 	}
 	}
 	return TRUE;

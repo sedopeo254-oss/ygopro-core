@@ -142,6 +142,16 @@ int main() {
 	auto* direct_damage = Processors::get_opt_variant<Processors::Damage>(field.core.subunits.back());
 	expect(direct_damage && direct_damage->duelist == 2,
 		"a direct attack must queue damage for the selected allied duelist only");
+	field.core.subunits.clear();
+	Processors::Damage effect_damage(0, nullptr, REASON_EFFECT, 1, nezbitt, 0, 700, false, 0);
+	expect(!field.process(effect_damage), "effect damage must pause for teammate interception");
+	auto* intercept_prompt = Processors::get_opt_variant<Processors::SelectYesNo>(field.core.subunits.back());
+	expect(intercept_prompt && intercept_prompt->playerid == 3,
+		"the first Let me take it prompt must be routed to Tristan's logical seat");
+	field.returns.set<int32_t>(0, 1);
+	effect_damage.step = 20;
+	expect(!field.process(effect_damage) && effect_damage.duelist == 1,
+		"accepting Let me take it must redirect effect damage to Tristan's life points");
 
 	std::cout << "All multiplayer field tests passed.\n";
 	return 0;

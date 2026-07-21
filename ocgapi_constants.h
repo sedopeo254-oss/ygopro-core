@@ -305,6 +305,7 @@
 /* Synthetic option descriptions used by the multiplayer UI. */
 #define MULTIPLAYER_OPTION_PLAYER_BASE 0xfffffff000000000ULL
 #define MULTIPLAYER_OPTION_PLAYER_MASK 0xffffffffffffff00ULL
+#define MULTIPLAYER_TAKE_ATTACK_DESC   0xfffffff000000100ULL
 
 /* Duel Hints */
 #define HINT_EVENT      1

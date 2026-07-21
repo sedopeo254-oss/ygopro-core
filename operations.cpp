@@ -552,6 +552,22 @@ bool field::process(Processors::Damage& arg) {
 	auto is_step = arg.is_step;
 	switch(arg.step) {
 	case 0: {
+		if(!arg.interception_offered && multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+				&& playerid == 0 && (reason & REASON_EFFECT) && !(reason & REASON_BATTLE) && amount > 0) {
+			arg.interception_offered = true;
+			arg.interceptors.clear();
+			for(uint8_t logical_player = 0; logical_player < 3; ++logical_player) {
+				if(multiplayer.is_active(logical_player)
+						&& multiplayer.duelist_index_of(logical_player) != duelist)
+					arg.interceptors.push_back(logical_player);
+			}
+			if(!arg.interceptors.empty()) {
+				arg.interceptor_index = 0;
+				emplace_process<Processors::SelectYesNo>(static_cast<uint8_t>(arg.interceptors.front() + 2), MULTIPLAYER_TAKE_ATTACK_DESC);
+				arg.step = 19;
+				return FALSE;
+			}
+		}
 		effect_set eset;
 		returns.set<uint32_t>(0, amount);
 		if(amount == 0)
@@ -647,6 +663,22 @@ bool field::process(Processors::Damage& arg) {
 	case 10: {
 		//dummy
 		return TRUE;
+	}
+	case 20: {
+		if(returns.at<int32_t>(0)) {
+			duelist = multiplayer.duelist_index_of(arg.interceptors[arg.interceptor_index]);
+			arg.duelist = duelist;
+			arg.step = Processors::restart;
+			return FALSE;
+		}
+		++arg.interceptor_index;
+		if(arg.interceptor_index < arg.interceptors.size()) {
+			emplace_process<Processors::SelectYesNo>(static_cast<uint8_t>(arg.interceptors[arg.interceptor_index] + 2), MULTIPLAYER_TAKE_ATTACK_DESC);
+			arg.step = 19;
+			return FALSE;
+		}
+		arg.step = Processors::restart;
+		return FALSE;
 	}
 	}
 	return TRUE;

@@ -107,8 +107,13 @@ struct SelectChain : public Process<true> {
 	uint8_t playerid;
 	uint8_t spe_count;
 	bool forced;
+	bool multiplayer_initialized;
+	std::vector<uint8_t> logical_players;
+	std::vector<size_t> chain_indices;
+	size_t logical_index;
 	SelectChain(uint16_t step_, uint8_t playerid_, uint8_t spe_count_, bool forced_) :
-		Process(step_), playerid(playerid_), spe_count(spe_count_), forced(forced_) {}
+		Process(step_), playerid(playerid_), spe_count(spe_count_), forced(forced_),
+		multiplayer_initialized(false), logical_index(0) {}
 };
 struct SelectPlace : public Process<true> {
 	uint8_t playerid;

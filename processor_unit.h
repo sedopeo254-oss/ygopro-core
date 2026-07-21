@@ -242,6 +242,7 @@ struct BattleCommand : public Process<false> {
 	owned_lua<group> cards_destroyed_by_battle;
 	card* reason_card;
 	std::multimap<effect*, card*> must_attack_map;
+	std::vector<uint8_t> attack_target_duelists;
 	BattleCommand(uint16_t step_, owned_lua<group> cards_destroyed_by_battle_ = nullptr, bool forced_attack_ = false) :
 		Process(step_), phase_to_change_to(0), forced_attack(forced_attack_), forced_attack_done(false), is_replaying_attack(false), attack_announce_failed(false),
 		repeat_battle_phase(false), second_battle_phase_is_optional(false),

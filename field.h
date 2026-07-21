@@ -317,6 +317,7 @@ struct processor {
 	uint8_t summon_cancelable;
 	card* attacker;
 	card* attack_target;
+	uint8_t attack_target_duelist{ 0xff };
 	bool set_forced_attack;
 	card* forced_attacker;
 	card* forced_attack_target;

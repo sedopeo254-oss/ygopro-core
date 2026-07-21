@@ -1797,6 +1797,8 @@ bool field::process(Processors::BattleCommand& arg) {
 		core.attack_player = FALSE;
 		core.attacker = nullptr;
 		core.attack_target = nullptr;
+		core.attack_target_duelist = 0xff;
+		arg.attack_target_duelists.clear();
 		if(auto peffect = is_player_affected_by_effect(infos.turn_player, EFFECT_SKIP_BP); peffect != nullptr || core.force_turn_end) {
 			arg.step = 41;
 			arg.phase_to_change_to = 2;
@@ -1985,12 +1987,47 @@ bool field::process(Processors::BattleCommand& arg) {
 				arg.step = Processors::restart;
 			return FALSE;
 		}
-		if(arg.forced_attack)
+		if(arg.forced_attack) {
 			arg.step = 6;
+			return FALSE;
+		}
+		if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1) {
+			arg.attack_target_duelists.clear();
+			for(uint8_t duelist = 0; duelist < multiplayer.field_count(0); ++duelist) {
+				const auto logical_player = multiplayer.logical_player(0, duelist);
+				if(!multiplayer.is_active(logical_player))
+					continue;
+				core.attack_target_duelist = duelist;
+				card_vector targets;
+				get_attack_target(core.attacker, &targets, core.chain_attack, true);
+				if(!targets.empty() || core.attacker->direct_attackable)
+					arg.attack_target_duelists.push_back(duelist);
+			}
+			if(arg.attack_target_duelists.empty()) {
+				core.attack_target_duelist = 0xff;
+				arg.attack_announce_failed = true;
+				arg.step = 6;
+				return FALSE;
+			}
+			core.attack_target_duelist = arg.attack_target_duelists.front();
+			if(arg.attack_target_duelists.size() > 1) {
+				core.select_options.clear();
+				for(const auto duelist : arg.attack_target_duelists) {
+					const auto logical_player = multiplayer.logical_player(0, duelist);
+					core.select_options.push_back(MULTIPLAYER_OPTION_PLAYER_BASE | logical_player);
+				}
+				emplace_process<Processors::SelectOption>(infos.turn_player);
+			}
+		}
 		return FALSE;
 	}
 	case 4: {
 		// select attack target(replay start point)
+		if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1
+				&& arg.attack_target_duelists.size() > 1) {
+			const auto selected = static_cast<size_t>(returns.at<int32_t>(0));
+			core.attack_target_duelist = arg.attack_target_duelists[selected];
+		}
 		core.attack_player = FALSE;
 		core.select_cards.clear();
 		return_cards.clear();
@@ -2089,9 +2126,12 @@ bool field::process(Processors::BattleCommand& arg) {
 			core.attack_target = nullptr;
 		else
 			core.attack_target = return_cards.list[0];
-		if(core.attack_target)
+		if(core.attack_target) {
+			if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+					&& core.attack_target->current.controler == 0)
+				core.attack_target_duelist = core.attack_target->current.duelist;
 			core.pre_field[1] = core.attack_target->fieldid_r;
-		else
+		} else
 			core.pre_field[1] = 0;
 		return FALSE;
 	}

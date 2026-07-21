@@ -2681,9 +2681,15 @@ int32_t field::effect_replace_check(uint32_t code, const tevent& e) {
 int32_t field::get_attack_target(card* pcard, card_vector* v, bool chain_attack, bool select_target, std::multimap<effect*, card*>* must_attack_map) {
 	pcard->direct_attackable = 0;
 	uint8_t p = pcard->current.controler;
+	auto outside_selected_3v1_field = [&](const card* target) {
+		return target && multiplayer.mode() == MultiplayerMode::THREE_V_ONE && p == 1
+			&& core.attack_target_duelist < multiplayer.field_count(0)
+			&& target->current.controler == 0
+			&& target->current.duelist != core.attack_target_duelist;
+	};
 	card_vector auto_attack, only_attack, must_attack, attack_tg;
 	for(auto& atarget : player[1 - p].list_mzone) {
-		if(atarget) {
+		if(atarget && !outside_selected_3v1_field(atarget)) {
 			if(atarget->is_affected_by_effect(EFFECT_ONLY_BE_ATTACKED))
 				auto_attack.push_back(atarget);
 			if(pcard->is_affected_by_effect(EFFECT_ONLY_ATTACK_MONSTER, atarget))
@@ -2715,7 +2721,7 @@ int32_t field::get_attack_target(card* pcard, card_vector* v, bool chain_attack,
 	} else {
 		atype = 4;
 		for(auto& atarget : player[1 - p].list_mzone)
-			if(atarget != core.attacker)
+			if(atarget != core.attacker && !outside_selected_3v1_field(atarget))
 				attack_tg.push_back(atarget);
 		if(is_player_affected_by_effect(p, EFFECT_SELF_ATTACK) && (!pcard->is_affected_by_effect(EFFECT_ATTACK_ALL) || !attack_tg.size())) {
 			for(auto& atarget : player[p].list_mzone)

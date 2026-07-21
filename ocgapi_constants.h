@@ -302,6 +302,10 @@
 #define MSG_PLAYER_ELIMINATED    191
 #define MSG_MULTIPLAYER_NEW_TURN 192
 
+/* Synthetic option descriptions used by the multiplayer UI. */
+#define MULTIPLAYER_OPTION_PLAYER_BASE 0xfffffff000000000ULL
+#define MULTIPLAYER_OPTION_PLAYER_MASK 0xffffffffffffff00ULL
+
 /* Duel Hints */
 #define HINT_EVENT      1
 #define HINT_MESSAGE    2

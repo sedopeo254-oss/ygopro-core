@@ -158,6 +158,10 @@ void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player
 	if(duelist == 0xff) {
 		if((reason & REASON_BATTLE) && core.attack_target && core.attack_target->current.controler == playerid)
 			duelist = core.attack_target->current.duelist;
+		else if((reason & REASON_BATTLE) && !core.attack_target
+				&& multiplayer.mode() == MultiplayerMode::THREE_V_ONE && playerid == 0
+				&& core.attack_target_duelist < multiplayer.field_count(0))
+			duelist = core.attack_target_duelist;
 		else
 			duelist = player[playerid].current_duelist;
 	}

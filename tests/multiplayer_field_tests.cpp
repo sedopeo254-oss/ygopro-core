@@ -122,6 +122,27 @@ int main() {
 		&& field.get_logical_lp(0, 2) == 1300,
 		"each allied duelist must retain independent life points");
 
+	auto* nezbitt = game.new_card(3000);
+	nezbitt->owner = 1;
+	field.add_card(1, nezbitt, LOCATION_MZONE, 0);
+	field.core.attacker = nezbitt;
+	field.core.attack_target_duelist = 0;
+	card_vector attack_targets;
+	field.get_attack_target(nezbitt, &attack_targets);
+	expect(attack_targets.size() == 1 && attack_targets.front() == serenity,
+		"Nezbitt must only see Serenity's monsters after selecting her as the attack target");
+	field.core.attack_target_duelist = 2;
+	attack_targets.clear();
+	field.get_attack_target(nezbitt, &attack_targets);
+	expect(attack_targets.size() == 1 && attack_targets.front() == duke,
+		"changing the selected attack target must project Duke's monster field");
+	field.core.subunits.clear();
+	field.core.attack_target = nullptr;
+	field.damage(nullptr, REASON_BATTLE, 1, nezbitt, 0, 500);
+	auto* direct_damage = Processors::get_opt_variant<Processors::Damage>(field.core.subunits.back());
+	expect(direct_damage && direct_damage->duelist == 2,
+		"a direct attack must queue damage for the selected allied duelist only");
+
 	std::cout << "All multiplayer field tests passed.\n";
 	return 0;
 }

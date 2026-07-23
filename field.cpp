@@ -256,7 +256,7 @@ void field::reload_field_info() {
 }
 // The core of moving cards, and Debug.AddCard() will call this function directly.
 // check Fusion/S/X monster redirection by the rule, set fieldid_r
-void field::add_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone) {
+void field::add_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone, uint8_t duelist) {
 	if (pcard->current.location != 0)
 		return;
 	if (!is_location_useable(playerid, location, sequence))
@@ -275,7 +275,7 @@ void field::add_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t se
 	}
 	pcard->current.controler = playerid;
 	pcard->current.location = location;
-	const auto logical_duelist = static_cast<uint8_t>((location & LOCATION_ONFIELD)
+	const auto logical_duelist = duelist != 0xff ? duelist : static_cast<uint8_t>((location & LOCATION_ONFIELD)
 		? player[playerid].current_duelist
 		: (playerid == pcard->owner ? pcard->owner_duelist : player[playerid].current_duelist));
 	pcard->current.duelist = logical_duelist;

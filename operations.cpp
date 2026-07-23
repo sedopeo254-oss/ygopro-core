@@ -147,10 +147,14 @@ void field::swap_control(effect* reason_effect, uint32_t reason_player, card* pc
 void field::equip(uint8_t equip_player, card* equip_card, card* target, bool faceup, bool is_step) {
 	emplace_process<Processors::Equip>(equip_player, equip_card, target, faceup, is_step);
 }
-void field::draw(effect* reason_effect, uint32_t reason, uint8_t reason_player, uint8_t playerid, uint16_t count) {
-	emplace_process<Processors::Draw>(reason_effect, reason, reason_player, playerid, count);
+void field::draw(effect* reason_effect, uint32_t reason, uint8_t reason_player, uint8_t playerid, uint16_t count,
+		uint8_t duelist) {
+	if(duelist == 0xff)
+		duelist = player[playerid].current_duelist;
+	emplace_process<Processors::Draw>(reason_effect, reason, reason_player, playerid, count, duelist);
 }
-void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player, card* reason_card, uint8_t playerid, uint32_t amount, bool is_step, uint8_t duelist) {
+void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player, card* reason_card, uint8_t playerid,
+		uint32_t amount, bool is_step, uint8_t duelist, bool allow_interception) {
 	if(reason & REASON_BATTLE)
 		reason_effect = nullptr;
 	else
@@ -165,7 +169,8 @@ void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player
 		else
 			duelist = player[playerid].current_duelist;
 	}
-	emplace_process<Processors::Damage>(reason_effect, reason, reason_player, reason_card, playerid, amount, is_step, duelist);
+	emplace_process<Processors::Damage>(reason_effect, reason, reason_player, reason_card, playerid, amount, is_step,
+		duelist, allow_interception);
 }
 void field::recover(effect* reason_effect, uint32_t reason, uint32_t reason_player, uint32_t playerid, uint32_t amount, bool is_step, uint8_t duelist) {
 	if(duelist == 0xff)
@@ -426,6 +431,7 @@ bool field::process(Processors::Draw& arg) {
 	auto reason = arg.reason;
 	auto reason_player = arg.reason_player;
 	auto playerid = arg.playerid;
+	auto duelist = arg.duelist;
 	auto count = arg.count;
 	switch(arg.step) {
 	case 0: {
@@ -440,17 +446,25 @@ bool field::process(Processors::Draw& arg) {
 			returns.set<int32_t>(0, 0);
 			return TRUE;
 		}
-		core.overdraw[playerid] = false;
+		const auto logical_player = multiplayer.logical_player(playerid, duelist);
+		if(multiplayer.enabled() && logical_player < MultiplayerState::MAX_PLAYERS)
+			core.multiplayer_overdraw_mask &= static_cast<uint8_t>(~(1u << logical_player));
+		else
+			core.overdraw[playerid] = false;
+		auto& deck = get_logical_list(playerid, LOCATION_DECK, duelist);
 		for(uint32_t i = 0; i < count; ++i) {
-			if(player[playerid].list_main.size() == 0) {
-				core.overdraw[playerid] = true;
+			if(deck.empty()) {
+				if(multiplayer.enabled() && logical_player < MultiplayerState::MAX_PLAYERS)
+					core.multiplayer_overdraw_mask |= static_cast<uint8_t>(1u << logical_player);
+				else
+					core.overdraw[playerid] = true;
 				break;
 			}
 			++drawn;
-			card* pcard = player[playerid].list_main.back();
+			card* pcard = deck.back();
 			pcard->enable_field_effect(false);
 			pcard->cancel_field_effect();
-			player[playerid].list_main.pop_back();
+			deck.pop_back();
 			if(core.current_chain.size() > 0)
 				core.just_sent_cards.insert(pcard);
 			pcard->previous.controler = pcard->current.controler;
@@ -463,7 +477,7 @@ bool field::process(Processors::Draw& arg) {
 			pcard->current.reason_player = reason_player;
 			pcard->current.reason = reason | REASON_DRAW;
 			pcard->current.location = 0;
-			add_card(playerid, pcard, LOCATION_HAND, 0);
+			add_card(playerid, pcard, LOCATION_HAND, 0, false, duelist);
 			pcard->enable_field_effect(true);
 			effect* pub = pcard->is_affected_by_effect(EFFECT_PUBLIC);
 			if(pub)
@@ -472,6 +486,16 @@ bool field::process(Processors::Draw& arg) {
 			cv.push_back(pcard);
 			pcard->reset(RESET_TOHAND, RESET_EVENT);
 		}
+		if(multiplayer.enabled()) {
+			core.overdraw[playerid] = false;
+			for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
+				if((core.multiplayer_overdraw_mask & (1u << logical))
+						&& multiplayer.field_side_of(logical) == playerid) {
+					core.overdraw[playerid] = true;
+					break;
+				}
+			}
+		}
 		core.hint_timing[playerid] |= TIMING_DRAW + TIMING_TOHAND;
 		adjust_instant();
 		arg.count = drawn;
@@ -479,9 +503,10 @@ bool field::process(Processors::Draw& arg) {
 		drawn_set.clear();
 		drawn_set.insert(cv.begin(), cv.end());
 		if(drawn) {
-			if(core.global_flag & GLOBALFLAG_DECK_REVERSE_CHECK) {
-				if(player[playerid].list_main.size()) {
-					card* ptop = player[playerid].list_main.back();
+			if(duelist == player[playerid].current_duelist
+					&& (core.global_flag & GLOBALFLAG_DECK_REVERSE_CHECK)) {
+				if(!deck.empty()) {
+					card* ptop = deck.back();
 					if(core.deck_reversed || (ptop->current.position == POS_FACEUP_DEFENSE)) {
 						auto message = pduel->new_message(MSG_DECK_TOP);
 						message->write<uint8_t>(playerid);
@@ -491,15 +516,22 @@ bool field::process(Processors::Draw& arg) {
 					}
 				}
 			}
-			auto message = pduel->new_message(MSG_DRAW);
-			message->write<uint8_t>(playerid);
-			message->write<uint32_t>(drawn);
-			for(const auto& pcard : cv) {
-				message->write<uint32_t>(pcard->data.code);
-				message->write<uint32_t>(pcard->current.position);
+			if(duelist == player[playerid].current_duelist) {
+				auto message = pduel->new_message(MSG_DRAW);
+				message->write<uint8_t>(playerid);
+				message->write<uint32_t>(drawn);
+				for(const auto& pcard : cv) {
+					message->write<uint32_t>(pcard->data.code);
+					message->write<uint32_t>(pcard->current.position);
+				}
+			} else {
+				auto message = pduel->new_message(MSG_MULTIPLAYER_DRAW);
+				message->write<uint8_t>(multiplayer.logical_player(playerid, duelist));
+				message->write<uint32_t>(drawn);
 			}
-			if(core.deck_reversed && (public_count < drawn)) {
-				message = pduel->new_message(MSG_CONFIRM_CARDS);
+			if(duelist == player[playerid].current_duelist
+					&& core.deck_reversed && (public_count < drawn)) {
+				auto message = pduel->new_message(MSG_CONFIRM_CARDS);
 				message->write<uint8_t>(1 - playerid);
 				message->write<uint32_t>(drawn_set.size());
 				for(auto& pcard : drawn_set) {
@@ -552,7 +584,7 @@ bool field::process(Processors::Damage& arg) {
 	auto is_step = arg.is_step;
 	switch(arg.step) {
 	case 0: {
-		if(!arg.interception_offered && multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+		if(arg.allow_interception && !arg.interception_offered && multiplayer.mode() == MultiplayerMode::THREE_V_ONE
 				&& playerid == 0 && (reason & REASON_EFFECT) && !(reason & REASON_BATTLE) && amount > 0) {
 			arg.interception_offered = true;
 			arg.interceptors.clear();

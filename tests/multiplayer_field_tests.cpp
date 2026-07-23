@@ -114,6 +114,26 @@ int main() {
 	expect(field.player[0].list_grave.size() == 1 && field.player[0].list_grave.front() == tristan,
 		"Tristan's graveyard must be restored with his card");
 
+	const auto tristan_hand_count = field.get_logical_list(0, LOCATION_HAND, 1).size();
+	const auto duke_hand_count = field.get_logical_list(0, LOCATION_HAND, 2).size();
+	Processors::Draw duke_draw(0, nullptr, REASON_EFFECT, 0, 0, 1, 2);
+	expect(!field.process(duke_draw), "drawing for an inactive allied duelist must complete its first processing step");
+	duke_draw.step = 1;
+	expect(field.process(duke_draw), "drawing for an inactive allied duelist must complete");
+	expect(field.get_logical_list(0, LOCATION_DECK, 2).empty()
+		&& field.get_logical_list(0, LOCATION_HAND, 2).size() == duke_hand_count + 1,
+		"the drawn card must move from Duke's deck to Duke's hand");
+	expect(field.get_logical_list(0, LOCATION_HAND, 1).size() == tristan_hand_count,
+		"drawing for Duke must not alter Tristan's currently visible hand");
+	Processors::Draw serenity_overdraw(0, nullptr, REASON_EFFECT, 0, 0, 1, 0);
+	expect(!field.process(serenity_overdraw), "Serenity's failed draw must be processed");
+	Processors::Draw duke_overdraw(0, nullptr, REASON_EFFECT, 0, 0, 1, 2);
+	expect(!field.process(duke_overdraw), "Duke's failed draw must be processed");
+	expect((field.core.multiplayer_overdraw_mask & 0x05) == 0x05,
+		"failed draws for multiple allied duelists must be tracked independently");
+	field.core.multiplayer_overdraw_mask = 0;
+	field.core.overdraw[0] = false;
+
 	field.get_logical_lp(0, 0) = 3100;
 	field.get_logical_lp(0, 1) = 2200;
 	field.get_logical_lp(0, 2) = 1300;
@@ -121,6 +141,14 @@ int main() {
 		&& field.get_logical_lp(0, 1) == 2200
 		&& field.get_logical_lp(0, 2) == 1300,
 		"each allied duelist must retain independent life points");
+	Processors::Recover duke_recover(0, nullptr, REASON_EFFECT, 0, 0, 200, false, 2);
+	expect(!field.process(duke_recover), "recovering an inactive allied duelist must complete its first step");
+	duke_recover.step = 1;
+	expect(!field.process(duke_recover), "recovering an inactive allied duelist must apply to life points");
+	expect(field.get_logical_lp(0, 2) == 1500
+		&& field.get_logical_lp(0, 0) == 3100
+		&& field.get_logical_lp(0, 1) == 2200,
+		"LP recovery must affect only the selected logical player");
 
 	auto* nezbitt = game.new_card(3000);
 	nezbitt->owner = 1;
@@ -143,7 +171,7 @@ int main() {
 	expect(direct_damage && direct_damage->duelist == 2,
 		"a direct attack must queue damage for the selected allied duelist only");
 	field.core.subunits.clear();
-	Processors::Damage effect_damage(0, nullptr, REASON_EFFECT, 1, nezbitt, 0, 700, false, 0);
+	Processors::Damage effect_damage(0, nullptr, REASON_EFFECT, 1, nezbitt, 0, 700, false, 0, true);
 	expect(!field.process(effect_damage), "effect damage must pause for teammate interception");
 	auto* intercept_prompt = Processors::get_opt_variant<Processors::SelectYesNo>(field.core.subunits.back());
 	expect(intercept_prompt && intercept_prompt->playerid == 3,
@@ -152,6 +180,16 @@ int main() {
 	effect_damage.step = 20;
 	expect(!field.process(effect_damage) && effect_damage.duelist == 1,
 		"accepting Let me take it must redirect effect damage to Tristan's life points");
+	field.core.subunits.clear();
+	const auto serenity_lp = field.get_logical_lp(0, 0);
+	Processors::Damage batch_damage(0, nullptr, REASON_EFFECT, 1, nezbitt, 0, 100, false, 0, false);
+	expect(!field.process(batch_damage), "non-interceptable batch damage must resolve its first processing step");
+	expect(field.core.subunits.empty(),
+		"non-interceptable batch damage must not enqueue a Let me take it prompt");
+	batch_damage.step = 1;
+	expect(!field.process(batch_damage), "non-interceptable batch damage must apply to life points");
+	expect(field.get_logical_lp(0, 0) == serenity_lp - 100,
+		"non-interceptable batch damage must affect the selected logical player");
 
 	std::cout << "All multiplayer field tests passed.\n";
 	return 0;

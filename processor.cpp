@@ -4782,23 +4782,22 @@ bool field::process(Processors::Adjust& arg) {
 				elimination_mask |= static_cast<uint8_t>(1u << logical_player);
 				reasons[logical_player] = PlayerEliminationReason::LP;
 			}
-			for(uint8_t side = 0; side < 2; ++side) {
-				const bool deck_loss = core.overdraw[side]
+			for(uint8_t logical_player = 0; logical_player < MultiplayerState::MAX_PLAYERS; ++logical_player) {
+				const auto side = multiplayer.field_side_of(logical_player);
+				const bool deck_loss = (core.multiplayer_overdraw_mask & (1u << logical_player))
 					&& !is_player_affected_by_effect(side, EFFECT_CANNOT_LOSE_DECK);
 				if(!deck_loss)
 					continue;
 				lost_by_deck = true;
-				const auto logical_player = multiplayer.logical_player(side, player[side].current_duelist);
-				if(logical_player < MultiplayerState::MAX_PLAYERS) {
-					const bool already_lost_by_lp = elimination_mask & (1u << logical_player);
-					elimination_mask |= static_cast<uint8_t>(1u << logical_player);
-					if(!already_lost_by_lp)
-						reasons[logical_player] = PlayerEliminationReason::DECK;
-				}
+				const bool already_lost_by_lp = elimination_mask & (1u << logical_player);
+				elimination_mask |= static_cast<uint8_t>(1u << logical_player);
+				if(!already_lost_by_lp)
+					reasons[logical_player] = PlayerEliminationReason::DECK;
 			}
 
 			const auto eliminated = eliminate_multiplayer_players(elimination_mask, reasons);
 			core.overdraw[0] = core.overdraw[1] = false;
+			core.multiplayer_overdraw_mask = 0;
 			if(multiplayer.is_finished()) {
 				uint8_t winner = PLAYER_NONE;
 				if(multiplayer.has_winner()) {

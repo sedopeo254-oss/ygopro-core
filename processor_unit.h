@@ -516,13 +516,14 @@ struct Draw : public Process<false> {
 	uint16_t count;
 	uint8_t reason_player;
 	uint8_t playerid;
+	uint8_t duelist;
 	uint32_t reason;
 	effect* reason_effect;
 	card_set drawn_set;
 	Draw(uint16_t step_, effect* reason_effect_, uint32_t reason_, uint8_t reason_player_,
-				  uint8_t playerid_, uint16_t count_) :
+				  uint8_t playerid_, uint16_t count_, uint8_t duelist_) :
 		Process(step_), count(count_), reason_player(reason_player_), playerid(playerid_),
-		reason(reason_), reason_effect(reason_effect_) {}
+		duelist(duelist_), reason(reason_), reason_effect(reason_effect_) {}
 };
 struct Damage : public Process<false> {
 	uint8_t reason_player;
@@ -537,11 +538,13 @@ struct Damage : public Process<false> {
 	std::vector<uint8_t> interceptors;
 	size_t interceptor_index;
 	bool interception_offered;
+	bool allow_interception;
 	Damage(uint16_t step_, effect* reason_effect_, uint32_t reason_, uint8_t reason_player_,
-					card* reason_card_, uint8_t playerid_, uint32_t amount_, bool is_step_, uint8_t duelist_) :
+					card* reason_card_, uint8_t playerid_, uint32_t amount_, bool is_step_, uint8_t duelist_,
+					bool allow_interception_) :
 		Process(step_), reason_player(reason_player_), playerid(playerid_), duelist(duelist_), is_step(is_step_), is_reflected(false),
 		amount(amount_), reason(reason_), reason_card(reason_card_), reason_effect(reason_effect_),
-		interceptor_index(0), interception_offered(false) {}
+		interceptor_index(0), interception_offered(false), allow_interception(allow_interception_) {}
 };
 struct Recover : public Process<false> {
 	uint8_t reason_player;

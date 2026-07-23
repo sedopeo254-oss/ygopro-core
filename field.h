@@ -351,6 +351,7 @@ struct processor {
 	uint8_t attack_player;
 	bool selfdes_disabled;
 	bool overdraw[2];
+	uint8_t multiplayer_overdraw_mask{};
 	int32_t check_level;
 	bool shuffle_check_disabled;
 	bool shuffle_hand_check[2];
@@ -432,7 +433,8 @@ public:
 	uint8_t eliminate_multiplayer_players(uint8_t player_mask,
 		const std::array<PlayerEliminationReason, MultiplayerState::MAX_PLAYERS>& reasons);
 
-	void add_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone = false);
+	void add_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone = false,
+		uint8_t duelist = 0xff);
 	void remove_card(card* pcard);
 	bool move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone = false);
 	void swap_card(card* pcard1, card* pcard2, uint8_t new_sequence1, uint8_t new_sequence2);
@@ -644,8 +646,10 @@ public:
 	void swap_control(effect* reason_effect, uint32_t reason_player, card_set targets1, card_set targets2, uint32_t reset_phase, uint32_t reset_count);
 	void swap_control(effect* reason_effect, uint32_t reason_player, card* pcard1, card* pcard2, uint32_t reset_phase, uint32_t reset_count);
 	void equip(uint8_t equip_player, card* equip_card, card* target, bool faceup, bool is_step);
-	void draw(effect* reason_effect, uint32_t reason, uint8_t reason_player, uint8_t playerid, uint16_t count);
-	void damage(effect* reason_effect, uint32_t reason, uint8_t reason_player, card* reason_card, uint8_t playerid, uint32_t amount, bool is_step = false, uint8_t duelist = 0xff);
+	void draw(effect* reason_effect, uint32_t reason, uint8_t reason_player, uint8_t playerid, uint16_t count,
+		uint8_t duelist = 0xff);
+	void damage(effect* reason_effect, uint32_t reason, uint8_t reason_player, card* reason_card, uint8_t playerid,
+		uint32_t amount, bool is_step = false, uint8_t duelist = 0xff, bool allow_interception = true);
 	void recover(effect* reason_effect, uint32_t reason, uint32_t reason_player, uint32_t playerid, uint32_t amount, bool is_step = false, uint8_t duelist = 0xff);
 	void summon(uint8_t sumplayer, card* target, effect* summon_procedure_effect, bool ignore_count, uint8_t min_tribute, uint32_t zone = 0x1f);
 	void mset(uint8_t setplayer, card* target, effect* proc, bool ignore_count, uint8_t min_tribute, uint32_t zone = 0x1f);

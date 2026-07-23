@@ -3250,13 +3250,13 @@ LUA_STATIC_FUNCTION(SelectEffectPlayers) {
 	pduel->game_field->emplace_process<Processors::SelectYesNo>(selecting_player,
 		MULTIPLAYER_EXPAND_EFFECT_DESC);
 	return yieldk({
-		const auto playerid = lua_get<uint8_t>(L, 1);
-		const auto include_self = lua_get<bool>(L, 2);
-		const auto include_opponents = lua_get<bool>(L, 3);
-		const auto [normal_mask, expanded_mask] =
-			GetEffectPlayerMasks(pduel->game_field, playerid, include_self, include_opponents);
+		const auto resumed_playerid = lua_get<uint8_t>(L, 1);
+		const auto resumed_include_self = lua_get<bool>(L, 2);
+		const auto resumed_include_opponents = lua_get<bool>(L, 3);
+		const auto resumed_masks = GetEffectPlayerMasks(pduel->game_field, resumed_playerid,
+			resumed_include_self, resumed_include_opponents);
 		const bool expanded = pduel->game_field->returns.at<int32_t>(0);
-		lua_pushinteger(L, expanded ? expanded_mask : normal_mask);
+		lua_pushinteger(L, expanded ? resumed_masks.second : resumed_masks.first);
 		lua_pushboolean(L, expanded);
 		return 2;
 	});

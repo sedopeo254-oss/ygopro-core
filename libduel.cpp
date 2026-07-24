@@ -3403,6 +3403,26 @@ LUA_STATIC_FUNCTION(SelectYesNo) {
 		return 1;
 	});
 }
+LUA_STATIC_FUNCTION(SelectYesNoPlayer) {
+	check_action_permission(L);
+	check_param_count(L, 2);
+	const auto logical_player = lua_get<uint8_t>(L, 1);
+	uint8_t selecting_player = logical_player;
+	if(pduel->game_field->multiplayer.enabled()) {
+		if(logical_player >= MultiplayerState::MAX_PLAYERS
+				|| !pduel->game_field->multiplayer.is_active(logical_player))
+			return 0;
+		selecting_player = pduel->game_field->multiplayer.prompt_player_of(logical_player);
+	} else if(logical_player > 1) {
+		return 0;
+	}
+	const auto desc = lua_get<uint64_t>(L, 2);
+	pduel->game_field->emplace_process<Processors::SelectYesNo>(selecting_player, desc);
+	return yieldk({
+		lua_pushboolean(L, pduel->game_field->returns.at<int32_t>(0));
+		return 1;
+	});
+}
 LUA_STATIC_FUNCTION(SelectEffectPlayers) {
 	check_action_permission(L);
 	check_param_count(L, 3);

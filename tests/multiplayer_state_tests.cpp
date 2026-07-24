@@ -71,6 +71,11 @@ void test_three_vs_one_team_winner() {
 		"the allied duelist mapping must preserve Duke's seat");
 	expect(state.duelist_index_of(3) == 0 && state.logical_player(1, 0) == 3,
 		"the solo field must map to Nezbitt's seat");
+	expect(state.prompt_player_of(0) == 2 && state.prompt_player_of(1) == 3
+		&& state.prompt_player_of(2) == 4,
+		"each allied Deck Master prompt must route to its own network seat");
+	expect(state.prompt_player_of(3) == 1,
+		"the solo Deck Master prompt must route to the opposing network side");
 	expect(state.next_active_player(0) == 1 && state.next_active_player(1) == 2
 		&& state.next_active_player(2) == 3 && state.next_active_player(3) == 0,
 		"3 vs 1 must follow Serenity, Tristan, Duke, then Nezbitt");

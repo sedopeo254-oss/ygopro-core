@@ -97,6 +97,14 @@ uint8_t MultiplayerState::logical_player(uint8_t field_side, uint8_t duelist_ind
 	return duelist_index == 0 ? 3 : NO_PLAYER;
 }
 
+uint8_t MultiplayerState::prompt_player_of(uint8_t player) const {
+	if(player >= MAX_PLAYERS || !enabled())
+		return NO_PLAYER;
+	if(duel_mode == MultiplayerMode::THREE_V_ONE && player < 3)
+		return static_cast<uint8_t>(player + 2);
+	return field_side_of(player);
+}
+
 uint32_t MultiplayerState::encode_zone_sequence(uint8_t field_side, uint8_t duelist_index, uint8_t stride, uint32_t local_sequence) const {
 	if(duel_mode != MultiplayerMode::THREE_V_ONE || field_side != 0 || !stride || local_sequence >= stride)
 		return local_sequence;

@@ -53,6 +53,14 @@ std::pair<uint8_t, uint8_t> GetEffectPlayerMasks(field* game_field, uint8_t play
 	return { normal_mask, expanded_mask };
 }
 
+uint8_t ResolveEffectLogicalPlayer(field* game_field, uint8_t playerid) {
+	if(playerid > 1)
+		return MultiplayerState::NO_PLAYER;
+	if(!game_field->multiplayer.enabled())
+		return playerid;
+	return game_field->multiplayer.logical_player(playerid, game_field->get_effect_duelist(playerid));
+}
+
 LUA_STATIC_FUNCTION(EnableGlobalFlag) {
 	check_param_count(L, 1);
 	// noop
@@ -83,6 +91,60 @@ LUA_STATIC_FUNCTION(SetLP) {
 LUA_STATIC_FUNCTION(GetTurnPlayer) {
 	lua_pushinteger(L, pduel->game_field->infos.turn_player);
 	return 1;
+}
+LUA_STATIC_FUNCTION(GetLogicalPlayer) {
+	check_param_count(L, 1);
+	const auto playerid = lua_get<uint8_t>(L, 1);
+	const auto logical_player = ResolveEffectLogicalPlayer(pduel->game_field, playerid);
+	if(logical_player == MultiplayerState::NO_PLAYER)
+		lua_pushnil(L);
+	else
+		lua_pushinteger(L, logical_player);
+	return 1;
+}
+LUA_STATIC_FUNCTION(GetLogicalPlayerSide) {
+	check_param_count(L, 1);
+	const auto logical_player = lua_get<uint8_t>(L, 1);
+	if(pduel->game_field->multiplayer.enabled()) {
+		if(logical_player >= MultiplayerState::MAX_PLAYERS) {
+			lua_pushnil(L);
+			return 1;
+		}
+		lua_pushinteger(L, pduel->game_field->multiplayer.field_side_of(logical_player));
+		return 1;
+	}
+	if(logical_player > 1)
+		lua_pushnil(L);
+	else
+		lua_pushinteger(L, logical_player);
+	return 1;
+}
+LUA_STATIC_FUNCTION(GetActiveLogicalPlayerMask) {
+	lua_pushinteger(L, pduel->game_field->multiplayer.enabled()
+		? pduel->game_field->multiplayer.active_mask() : 0);
+	return 1;
+}
+LUA_STATIC_FUNCTION(IsLogicalPlayerActive) {
+	check_param_count(L, 1);
+	const auto logical_player = lua_get<uint8_t>(L, 1);
+	lua_pushboolean(L, pduel->game_field->multiplayer.enabled()
+		? pduel->game_field->multiplayer.is_active(logical_player) : logical_player < 2);
+	return 1;
+}
+LUA_STATIC_FUNCTION(SetDeckMasterPlayerState) {
+	check_action_permission(L);
+	check_param_count(L, 3);
+	const auto logical_player = lua_get<uint8_t>(L, 1);
+	const auto code = lua_get<uint32_t>(L, 2);
+	const auto visible = lua_get<bool>(L, 3);
+	if(!pduel->game_field->multiplayer.enabled()
+			|| logical_player >= MultiplayerState::MAX_PLAYERS)
+		return 0;
+	auto message = pduel->new_message(MSG_MULTIPLAYER_DECK_MASTER);
+	message->write<uint8_t>(logical_player);
+	message->write<uint8_t>(visible ? 1 : 0);
+	message->write<uint32_t>(code);
+	return 0;
 }
 LUA_STATIC_FUNCTION(IsTurnPlayer) {
 	check_param_count(L, 1);
@@ -429,6 +491,34 @@ LUA_STATIC_FUNCTION(CreateToken) {
 	pcard->owner = playerid;
 	pcard->current.location = 0;
 	pcard->current.controler = playerid;
+	interpreter::pushobject(L, pcard);
+	return 1;
+}
+LUA_STATIC_FUNCTION(CreateTokenPlayer) {
+	check_action_permission(L);
+	check_param_count(L, 2);
+	const auto logical_player = lua_get<uint8_t>(L, 1);
+	uint8_t playerid = logical_player;
+	uint8_t duelist = 0;
+	if(pduel->game_field->multiplayer.enabled()) {
+		if(logical_player >= MultiplayerState::MAX_PLAYERS) {
+			lua_pushnil(L);
+			return 1;
+		}
+		playerid = pduel->game_field->multiplayer.field_side_of(logical_player);
+		duelist = pduel->game_field->multiplayer.duelist_index_of(logical_player);
+	}
+	if(playerid > 1) {
+		lua_pushnil(L);
+		return 1;
+	}
+	const auto code = lua_get<uint32_t>(L, 2);
+	card* pcard = pduel->new_card(code);
+	pcard->owner = playerid;
+	pcard->owner_duelist = duelist;
+	pcard->current.location = 0;
+	pcard->current.controler = playerid;
+	pcard->current.duelist = duelist;
 	interpreter::pushobject(L, pcard);
 	return 1;
 }
@@ -2307,6 +2397,37 @@ LUA_STATIC_FUNCTION(GetFieldGroupCount) {
 	lua_pushinteger(L, count);
 	return 1;
 }
+LUA_STATIC_FUNCTION(GetPlayerFieldGroup) {
+	check_param_count(L, 2);
+	const auto logical_player = lua_get<uint8_t>(L, 1);
+	const auto locations = lua_get<uint16_t>(L, 2);
+	auto pgroup = pduel->new_group();
+	if(!pduel->game_field->multiplayer.enabled()
+			|| logical_player >= MultiplayerState::MAX_PLAYERS) {
+		interpreter::pushobject(L, pgroup);
+		return 1;
+	}
+	const auto side = pduel->game_field->multiplayer.field_side_of(logical_player);
+	const auto duelist = pduel->game_field->multiplayer.duelist_index_of(logical_player);
+	for(const auto location : { LOCATION_DECK, LOCATION_HAND, LOCATION_GRAVE, LOCATION_REMOVED, LOCATION_EXTRA }) {
+		if(!(locations & location))
+			continue;
+		const auto& cards = pduel->game_field->get_logical_list(side, location, duelist);
+		pgroup->container.insert(cards.begin(), cards.end());
+	}
+	if(locations & LOCATION_MZONE) {
+		for(auto* pcard : pduel->game_field->player[side].list_mzone)
+			if(pcard && pcard->current.duelist == duelist)
+				pgroup->container.insert(pcard);
+	}
+	if(locations & LOCATION_SZONE) {
+		for(auto* pcard : pduel->game_field->player[side].list_szone)
+			if(pcard && pcard->current.duelist == duelist)
+				pgroup->container.insert(pcard);
+	}
+	interpreter::pushobject(L, pgroup);
+	return 1;
+}
 LUA_STATIC_FUNCTION(GetPlayerFieldGroupCount) {
 	check_param_count(L, 2);
 	const auto logical_player = lua_get<uint8_t>(L, 1);
@@ -2533,6 +2654,57 @@ LUA_STATIC_FUNCTION(SelectCardsFromCodes) {
 			ret = (int)ret_codes.list.size();
 		} else
 			lua_pushnil(L);
+		return ret;
+	});
+}
+LUA_STATIC_FUNCTION(SelectCardsFromCodesPlayer) {
+	check_action_permission(L);
+	check_param_count(L, 6);
+	pduel->game_field->core.select_cards_codes.clear();
+	const auto logical_player = lua_get<uint8_t>(L, 1);
+	uint8_t playerid = logical_player;
+	uint8_t display_playerid = logical_player;
+	if(pduel->game_field->multiplayer.enabled()) {
+		if(logical_player >= MultiplayerState::MAX_PLAYERS
+				|| !pduel->game_field->multiplayer.is_active(logical_player))
+			return 0;
+		playerid = pduel->game_field->multiplayer.prompt_player_of(logical_player);
+		display_playerid = pduel->game_field->multiplayer.field_side_of(logical_player);
+	}
+	if(playerid == MultiplayerState::NO_PLAYER || display_playerid > 1)
+		return 0;
+	const auto min = lua_get<uint16_t>(L, 2);
+	const auto max = lua_get<uint16_t>(L, 3);
+	const bool cancelable = lua_get<bool>(L, 4);
+	check_param<LuaParam::BOOLEAN>(L, 5);
+	lua_iterate_table_or_stack(L, 6, lua_gettop(L), [L, &select_codes = pduel->game_field->core.select_cards_codes]{
+		select_codes.emplace_back(lua_get<uint32_t>(L, -1), static_cast<uint32_t>(select_codes.size() + 1));
+	});
+	pduel->game_field->emplace_process<Processors::SelectCardCodes>(
+		playerid, cancelable, min, max, display_playerid);
+	return yieldk({
+		int ret = 1;
+		const auto& ret_codes = pduel->game_field->return_card_codes;
+		if(!ret_codes.canceled) {
+			const bool ret_index = lua_get<bool>(L, 5);
+			luaL_checkstack(L, static_cast<int>(ret_codes.list.size() + (3 * ret_index)), nullptr);
+			for(const auto& obj : ret_codes.list) {
+				if(ret_index) {
+					lua_createtable(L, 2, 0);
+					lua_pushinteger(L, 1);
+				}
+				lua_pushinteger(L, obj.first);
+				if(ret_index) {
+					lua_settable(L, -3);
+					lua_pushinteger(L, 2);
+					lua_pushinteger(L, obj.second);
+					lua_settable(L, -3);
+				}
+			}
+			ret = static_cast<int>(ret_codes.list.size());
+		} else {
+			lua_pushnil(L);
+		}
 		return ret;
 	});
 }
@@ -4222,6 +4394,45 @@ LUA_STATIC_FUNCTION(GetCardFromCardID) {
 		}
 	}
 	return 0;
+}
+LUA_STATIC_FUNCTION(EliminatePlayer) {
+	check_action_permission(L);
+	check_param_count(L, 1);
+	const auto logical_player = lua_get<uint8_t>(L, 1);
+	const auto reason = lua_get<uint8_t, static_cast<uint8_t>(PlayerEliminationReason::EFFECT)>(L, 2);
+	const auto win_reason = lua_get<uint8_t, 0>(L, 3);
+	if(!pduel->game_field->multiplayer.enabled()
+			|| logical_player >= MultiplayerState::MAX_PLAYERS
+			|| reason < static_cast<uint8_t>(PlayerEliminationReason::LP)
+			|| reason > static_cast<uint8_t>(PlayerEliminationReason::EFFECT)
+			|| !pduel->game_field->multiplayer.is_active(logical_player)) {
+		lua_pushboolean(L, 0);
+		return 1;
+	}
+	const bool was_current_player = pduel->game_field->multiplayer.current_player() == logical_player;
+	if(!pduel->game_field->eliminate_multiplayer_player(
+			logical_player, static_cast<PlayerEliminationReason>(reason))) {
+		lua_pushboolean(L, 0);
+		return 1;
+	}
+	if(pduel->game_field->multiplayer.is_finished()) {
+		uint8_t winner = PLAYER_NONE;
+		if(pduel->game_field->multiplayer.has_winner()) {
+			winner = pduel->game_field->multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+				? pduel->game_field->multiplayer.winner_team()
+				: pduel->game_field->multiplayer.field_side_of(
+					pduel->game_field->multiplayer.winner_player());
+		}
+		auto message = pduel->new_message(MSG_WIN);
+		message->write<uint8_t>(winner);
+		message->write<uint8_t>(win_reason);
+		pduel->game_field->core.win_player = 5;
+		pduel->game_field->core.win_reason = 0;
+	} else if(was_current_player) {
+		pduel->game_field->core.force_turn_end = true;
+	}
+	lua_pushboolean(L, 1);
+	return 1;
 }
 LUA_STATIC_FUNCTION(LoadScript) {
 	check_param_count(L, 1);

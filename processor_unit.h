@@ -85,12 +85,15 @@ struct SelectCard : public Process<true> {
 };
 struct SelectCardCodes : public Process<true> {
 	uint8_t playerid;
+	uint8_t display_playerid;
 	bool cancelable;
 	uint8_t min;
 	uint8_t max;
 	SelectCardCodes(uint16_t step_, uint8_t playerid_, bool cancelable_,
-					uint8_t min_, uint8_t max_) :
-		Process(step_), playerid(playerid_), cancelable(cancelable_), min(min_), max(max_) {}
+					uint8_t min_, uint8_t max_, uint8_t display_playerid_ = 0xff) :
+		Process(step_), playerid(playerid_),
+		display_playerid(display_playerid_ == 0xff ? playerid_ : display_playerid_),
+		cancelable(cancelable_), min(min_), max(max_) {}
 };
 struct SelectUnselectCard : public Process<true> {
 	uint8_t playerid;

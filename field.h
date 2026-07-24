@@ -450,6 +450,7 @@ public:
 	uint32_t& get_logical_extra_p_count(uint8_t playerid, uint8_t duelist);
 	int32_t& get_logical_lp(uint8_t playerid, uint8_t duelist);
 	uint8_t get_effect_duelist(uint8_t playerid) const;
+	uint8_t get_response_player(uint8_t playerid) const;
 	int32_t is_field_location_valid(uint32_t location, uint32_t sequence);
 	int32_t is_location_useable(uint32_t playerid, uint32_t location, uint32_t sequence);
 	int32_t get_useable_count(card* pcard, uint8_t playerid, uint8_t location, uint8_t uplayer, uint32_t reason, uint32_t zone = 0xff, uint32_t* list = nullptr);

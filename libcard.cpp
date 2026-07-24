@@ -420,7 +420,31 @@ LUA_FUNCTION(GetOwner) {
 	lua_pushinteger(L, self->owner);
 	return 1;
 }
+LUA_FUNCTION(GetLogicalOwner) {
+	if(pduel->game_field->multiplayer.enabled()) {
+		const auto logical = pduel->game_field->multiplayer.logical_player(
+			self->owner, self->owner_duelist);
+		if(logical != MultiplayerState::NO_PLAYER) {
+			lua_pushinteger(L, logical);
+			return 1;
+		}
+	}
+	lua_pushinteger(L, self->owner);
+	return 1;
+}
 LUA_FUNCTION(GetControler) {
+	lua_pushinteger(L, self->current.controler);
+	return 1;
+}
+LUA_FUNCTION(GetLogicalControler) {
+	if(pduel->game_field->multiplayer.enabled()) {
+		const auto logical = pduel->game_field->multiplayer.logical_player(
+			self->current.controler, self->current.duelist);
+		if(logical != MultiplayerState::NO_PLAYER) {
+			lua_pushinteger(L, logical);
+			return 1;
+		}
+	}
 	lua_pushinteger(L, self->current.controler);
 	return 1;
 }

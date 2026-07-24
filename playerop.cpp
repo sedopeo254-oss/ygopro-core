@@ -159,6 +159,7 @@ bool field::process(Processors::SelectIdleCmd& arg) {
 }
 bool field::process(Processors::SelectEffectYesNo& arg) {
 	auto playerid = arg.playerid;
+	const auto selecting_player = get_response_player(playerid);
 	auto pcard = arg.pcard;
 	auto description = arg.description;
 	if(arg.step == 0) {
@@ -167,7 +168,7 @@ bool field::process(Processors::SelectEffectYesNo& arg) {
 			return TRUE;
 		}
 		auto message = pduel->new_message(MSG_SELECT_EFFECTYN);
-		message->write<uint8_t>(playerid);
+		message->write<uint8_t>(selecting_player);
 		message->write<uint32_t>(pcard->data.code);
 		message->write(pcard->get_info_location());
 		message->write<uint64_t>(description);
@@ -183,6 +184,7 @@ bool field::process(Processors::SelectEffectYesNo& arg) {
 }
 bool field::process(Processors::SelectYesNo& arg) {
 	auto playerid = arg.playerid;
+	const auto selecting_player = get_response_player(playerid);
 	auto description = arg.description;
 	if(arg.step == 0) {
 		if((playerid == 1) && is_flag(DUEL_SIMPLE_AI)) {
@@ -190,7 +192,7 @@ bool field::process(Processors::SelectYesNo& arg) {
 			return TRUE;
 		}
 		auto message = pduel->new_message(MSG_SELECT_YESNO);
-		message->write<uint8_t>(playerid);
+		message->write<uint8_t>(selecting_player);
 		message->write<uint64_t>(description);
 		returns.set<int32_t>(0, -1);
 		return FALSE;
@@ -204,6 +206,7 @@ bool field::process(Processors::SelectYesNo& arg) {
 }
 bool field::process(Processors::SelectOption& arg) {
 	auto playerid = arg.playerid;
+	const auto selecting_player = get_response_player(playerid);
 	if(arg.step == 0) {
 		returns.set<int32_t>(0, -1);
 		if(core.select_options.size() == 0) {
@@ -218,7 +221,7 @@ bool field::process(Processors::SelectOption& arg) {
 			return TRUE;
 		}
 		auto message = pduel->new_message(MSG_SELECT_OPTION);
-		message->write<uint8_t>(playerid);
+		message->write<uint8_t>(selecting_player);
 		message->write<uint8_t>(static_cast<uint8_t>(core.select_options.size()));
 		for(auto& option : core.select_options)
 			message->write<uint64_t>(option);
@@ -278,6 +281,7 @@ bool inline field::parse_response_cards(bool cancelable) {
 }
 bool field::process(Processors::SelectCard& arg) {
 	auto playerid = arg.playerid;
+	const auto selecting_player = get_response_player(playerid);
 	auto cancelable = arg.cancelable;
 	auto min = arg.min;
 	auto max = arg.max;
@@ -304,7 +308,7 @@ bool field::process(Processors::SelectCard& arg) {
 		arg.min = min;
 		arg.max = max;
 		auto message = pduel->new_message(MSG_SELECT_CARD);
-		message->write<uint8_t>(playerid);
+		message->write<uint8_t>(selecting_player);
 		message->write<uint8_t>(cancelable || min == 0);
 		message->write<uint32_t>(min);
 		message->write<uint32_t>(max);
@@ -333,6 +337,8 @@ bool field::process(Processors::SelectCard& arg) {
 }
 bool field::process(Processors::SelectCardCodes& arg) {
 	auto playerid = arg.playerid;
+	const auto selecting_player = get_response_player(playerid);
+	auto display_playerid = arg.display_playerid;
 	auto cancelable = arg.cancelable;
 	auto min = arg.min;
 	auto max = arg.max;
@@ -359,14 +365,14 @@ bool field::process(Processors::SelectCardCodes& arg) {
 		arg.min = min;
 		arg.max = max;
 		auto message = pduel->new_message(MSG_SELECT_CARD);
-		message->write<uint8_t>(playerid);
+		message->write<uint8_t>(selecting_player);
 		message->write<uint8_t>(cancelable || min == 0);
 		message->write<uint32_t>(min);
 		message->write<uint32_t>(max);
 		message->write<uint32_t>((uint32_t)core.select_cards_codes.size());
 		for(const auto& obj : core.select_cards_codes) {
 			message->write<uint32_t>(obj.first);
-			message->write(loc_info{ playerid, 0, 0, 0, 0 });
+			message->write(loc_info{ display_playerid, 0, 0, 0, 0 });
 		}
 		return FALSE;
 	} else {
@@ -387,6 +393,7 @@ bool field::process(Processors::SelectCardCodes& arg) {
 }
 bool field::process(Processors::SelectUnselectCard& arg) {
 	auto playerid = arg.playerid;
+	const auto selecting_player = get_response_player(playerid);
 	auto cancelable = arg.cancelable;
 	auto min = arg.min;
 	auto max = arg.max;
@@ -409,7 +416,7 @@ bool field::process(Processors::SelectUnselectCard& arg) {
 			return TRUE;
 		}
 		auto message = pduel->new_message(MSG_SELECT_UNSELECT_CARD);
-		message->write<uint8_t>(playerid);
+		message->write<uint8_t>(selecting_player);
 		message->write<uint8_t>(finishable);
 		message->write<uint8_t>(cancelable);
 		message->write<uint32_t>(min);

@@ -188,6 +188,13 @@ uint8_t field::get_effect_duelist(uint8_t playerid) const {
 		return handler->current.duelist;
 	return player[playerid].current_duelist;
 }
+uint8_t field::get_response_player(uint8_t playerid) const {
+	if(multiplayer.mode() != MultiplayerMode::THREE_V_ONE || playerid > 1)
+		return playerid;
+	const auto logical = multiplayer.logical_player(playerid, get_effect_duelist(playerid));
+	return logical < MultiplayerState::MAX_PLAYERS
+		? multiplayer.prompt_player_of(logical) : playerid;
+}
 bool field::eliminate_multiplayer_player(uint8_t playerid, PlayerEliminationReason reason) {
 	if(playerid >= MultiplayerState::MAX_PLAYERS)
 		return false;

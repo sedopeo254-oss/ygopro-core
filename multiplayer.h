@@ -42,6 +42,7 @@ public:
 	uint8_t field_count(uint8_t field_side) const;
 	uint8_t duelist_index_of(uint8_t player) const;
 	uint8_t logical_player(uint8_t field_side, uint8_t duelist_index) const;
+	uint8_t prompt_player_of(uint8_t player) const;
 	uint32_t encode_zone_sequence(uint8_t field_side, uint8_t duelist_index, uint8_t stride, uint32_t local_sequence) const;
 	uint32_t local_zone_sequence(uint8_t field_side, uint8_t stride, uint32_t sequence) const;
 	uint8_t zone_duelist_index(uint8_t field_side, uint8_t stride, uint32_t sequence) const;

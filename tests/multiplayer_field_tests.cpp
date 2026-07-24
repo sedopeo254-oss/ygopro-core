@@ -1,5 +1,6 @@
 #include "card.h"
 #include "duel.h"
+#include "effect.h"
 #include "field.h"
 #include "ocgapi.h"
 
@@ -88,6 +89,15 @@ int main() {
 		&& field.player[0].list_mzone[7] == tristan
 		&& field.player[0].list_mzone[14] == duke,
 		"all three allied fields must remain simultaneously present");
+	auto* duke_effect = game.new_effect();
+	duke_effect->owner = duke;
+	duke_effect->handler = duke;
+	field.core.reason_effect = duke_effect;
+	expect(field.get_effect_duelist(0) == 2 && field.get_response_player(0) == 4,
+		"a Duke Deck Master ability must route its prompts to Duke even outside his turn");
+	field.core.reason_effect = nullptr;
+	expect(field.get_response_player(0) == 4,
+		"the current allied field must remain the response fallback without an effect handler");
 
 	auto* tristan_hand = game.new_card(2003);
 	tristan_hand->owner = 0;

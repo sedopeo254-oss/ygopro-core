@@ -1798,6 +1798,7 @@ bool field::process(Processors::BattleCommand& arg) {
 		core.attacker = nullptr;
 		core.attack_target = nullptr;
 		core.attack_target_duelist = 0xff;
+		core.attack_target_logical = 0xff;
 		arg.attack_target_duelists.clear();
 		arg.attack_interceptors.clear();
 		arg.attack_interceptor_index = 0;
@@ -1994,7 +1995,36 @@ bool field::process(Processors::BattleCommand& arg) {
 			arg.step = 6;
 			return FALSE;
 		}
-		if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1) {
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+			arg.attack_target_duelists.clear();
+			const auto attacker_logical = multiplayer.logical_player(
+				core.attacker->current.controler, core.attacker->current.duelist);
+			for(uint8_t logical_player = 0; logical_player < MultiplayerState::MAX_PLAYERS; ++logical_player) {
+				if(logical_player == attacker_logical || !multiplayer.is_active(logical_player))
+					continue;
+				core.attack_target_logical = logical_player;
+				core.attack_target_duelist = multiplayer.duelist_index_of(logical_player);
+				card_vector targets;
+				get_attack_target(core.attacker, &targets, core.chain_attack, true);
+				if(!targets.empty() || core.attacker->direct_attackable)
+					arg.attack_target_duelists.push_back(logical_player);
+			}
+			if(arg.attack_target_duelists.empty()) {
+				core.attack_target_logical = 0xff;
+				core.attack_target_duelist = 0xff;
+				arg.attack_announce_failed = true;
+				arg.step = 6;
+				return FALSE;
+			}
+			core.attack_target_logical = arg.attack_target_duelists.front();
+			core.attack_target_duelist = multiplayer.duelist_index_of(core.attack_target_logical);
+			if(arg.attack_target_duelists.size() > 1) {
+				core.select_options.clear();
+				for(const auto logical_player : arg.attack_target_duelists)
+					core.select_options.push_back(MULTIPLAYER_OPTION_PLAYER_BASE | logical_player);
+				emplace_process<Processors::SelectOption>(infos.turn_player);
+			}
+		} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1) {
 			arg.attack_target_duelists.clear();
 			for(uint8_t duelist = 0; duelist < multiplayer.field_count(0); ++duelist) {
 				const auto logical_player = multiplayer.logical_player(0, duelist);
@@ -2026,7 +2056,12 @@ bool field::process(Processors::BattleCommand& arg) {
 	}
 	case 4: {
 		// select attack target(replay start point)
-		if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+				&& arg.attack_target_duelists.size() > 1) {
+			const auto selected = static_cast<size_t>(returns.at<int32_t>(0));
+			core.attack_target_logical = arg.attack_target_duelists[selected];
+			core.attack_target_duelist = multiplayer.duelist_index_of(core.attack_target_logical);
+		} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1
 				&& arg.attack_target_duelists.size() > 1) {
 			const auto selected = static_cast<size_t>(returns.at<int32_t>(0));
 			core.attack_target_duelist = arg.attack_target_duelists[selected];
@@ -2149,7 +2184,11 @@ bool field::process(Processors::BattleCommand& arg) {
 		else
 			core.attack_target = return_cards.list[0];
 		if(core.attack_target) {
-			if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+				core.attack_target_logical = multiplayer.logical_player(
+					core.attack_target->current.controler, core.attack_target->current.duelist);
+				core.attack_target_duelist = core.attack_target->current.duelist;
+			} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE
 					&& core.attack_target->current.controler == 0)
 				core.attack_target_duelist = core.attack_target->current.duelist;
 			core.pre_field[1] = core.attack_target->fieldid_r;
@@ -2551,16 +2590,43 @@ bool field::process(Processors::BattleCommand& arg) {
 			core.attack_target->battled_cards.addcard(core.attacker);
 		auto* reason_card = arg.reason_card;
 		effect* damchange = std::exchange(arg.damage_change_effect, nullptr);
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE && !core.attack_target
+				&& multiplayer.is_active(core.attack_target_logical)) {
+			const auto target_side = multiplayer.field_side_of(core.attack_target_logical);
+			const auto default_side = static_cast<uint8_t>(1 - infos.turn_player);
+			if(target_side != default_side) {
+				core.battle_damage[target_side] += core.battle_damage[default_side];
+				core.battle_damage[default_side] = 0;
+			}
+		}
+		auto BattleDamageDuelist = [&](uint8_t side) -> uint8_t {
+			if(multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE)
+				return 0xff;
+			if(!core.attack_target && multiplayer.is_active(core.attack_target_logical)
+					&& multiplayer.field_side_of(core.attack_target_logical) == side)
+				return multiplayer.duelist_index_of(core.attack_target_logical);
+			if(core.attack_target) {
+				if(reason_card == core.attacker && core.attack_target->current.controler == side)
+					return core.attack_target->current.duelist;
+				if(reason_card == core.attack_target && core.attacker->current.controler == side)
+					return core.attacker->current.duelist;
+			}
+			return player[side].current_duelist;
+		};
 		if(!damchange) {
 			if(core.battle_damage[0])
-				damage(nullptr, REASON_BATTLE, arg.reason_player, reason_card, 0, core.battle_damage[0]);
+				damage(nullptr, REASON_BATTLE, arg.reason_player, reason_card, 0, core.battle_damage[0],
+					false, BattleDamageDuelist(0));
 			if(core.battle_damage[1])
-				damage(nullptr, REASON_BATTLE, arg.reason_player, reason_card, 1, core.battle_damage[1]);
+				damage(nullptr, REASON_BATTLE, arg.reason_player, reason_card, 1, core.battle_damage[1],
+					false, BattleDamageDuelist(1));
 		} else {
 			if(core.battle_damage[0])
-				damage(damchange, REASON_EFFECT, arg.reason_player, reason_card, 0, core.battle_damage[0]);
+				damage(damchange, REASON_EFFECT, arg.reason_player, reason_card, 0, core.battle_damage[0],
+					false, BattleDamageDuelist(0));
 			if(core.battle_damage[1])
-				damage(damchange, REASON_EFFECT, arg.reason_player, reason_card, 1, core.battle_damage[1]);
+				damage(damchange, REASON_EFFECT, arg.reason_player, reason_card, 1, core.battle_damage[1],
+					false, BattleDamageDuelist(1));
 		}
 		reset_phase(PHASE_DAMAGE_CAL);
 		adjust_all();
@@ -3415,7 +3481,7 @@ bool field::process(Processors::Turn& arg) {
 			auto logical_message = pduel->new_message(MSG_MULTIPLAYER_NEW_TURN);
 			logical_message->write<uint8_t>(logical_player);
 			logical_message->write<uint8_t>(multiplayer.active_mask());
-			if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE) {
+			if(multiplayer.enabled()) {
 				// Publish a fixed snapshot so every client can render the four
 				// independent resource areas even while a pile is not active.
 				for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {

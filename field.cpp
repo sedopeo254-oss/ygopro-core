@@ -66,9 +66,13 @@ bool tevent::operator< (const tevent& rhs) const {
 }
 field::field(duel* _pduel, const OCG_DuelOptions& options) :pduel(_pduel), player({ {options.team1, options.team2} }) {
 	core.duel_options = options.flags;
-	if(options.flags & DUEL_BATTLE_ROYALE)
+	if(options.flags & DUEL_BATTLE_ROYALE) {
 		multiplayer.configure(MultiplayerMode::BATTLE_ROYALE);
-	else if(options.flags & DUEL_3_V_1) {
+		for(uint8_t side = 0; side < 2; ++side) {
+			player[side].list_mzone.resize(7 * multiplayer.field_count(side), nullptr);
+			player[side].list_szone.resize(8 * multiplayer.field_count(side), nullptr);
+		}
+	} else if(options.flags & DUEL_3_V_1) {
 		multiplayer.configure(MultiplayerMode::THREE_V_ONE);
 		// Side 0 owns three simultaneous fields. Internal on-field sequences are
 		// unique while Lua-facing zone operations continue to use local indices.
@@ -95,7 +99,7 @@ uint8_t field::get_zone_duelist(uint8_t playerid, uint8_t location, uint32_t seq
 	const uint8_t stride = location == LOCATION_MZONE ? 7 : location == LOCATION_SZONE ? 8 : 0;
 	if(!stride)
 		return player[playerid].current_duelist;
-	if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && playerid == 0 && sequence < stride)
+	if(multiplayer.enabled() && multiplayer.field_count(playerid) > 1 && sequence < stride)
 		return player[playerid].current_duelist;
 	return multiplayer.zone_duelist_index(playerid, stride, sequence);
 }
@@ -181,7 +185,7 @@ int32_t& field::get_logical_lp(uint8_t playerid, uint8_t duelist) {
 }
 
 uint8_t field::get_effect_duelist(uint8_t playerid) const {
-	if(multiplayer.mode() != MultiplayerMode::THREE_V_ONE || playerid != 0 || !core.reason_effect)
+	if(!multiplayer.enabled() || playerid > 1 || !core.reason_effect)
 		return player[playerid].current_duelist;
 	const auto* handler = core.reason_effect->get_handler();
 	if(handler && handler->current.controler == playerid)
@@ -189,7 +193,7 @@ uint8_t field::get_effect_duelist(uint8_t playerid) const {
 	return player[playerid].current_duelist;
 }
 uint8_t field::get_response_player(uint8_t playerid) const {
-	if(multiplayer.mode() != MultiplayerMode::THREE_V_ONE || playerid > 1)
+	if(!multiplayer.enabled() || playerid > 1)
 		return playerid;
 	const auto logical = multiplayer.logical_player(playerid, get_effect_duelist(playerid));
 	return logical < MultiplayerState::MAX_PLAYERS
@@ -2688,15 +2692,26 @@ int32_t field::effect_replace_check(uint32_t code, const tevent& e) {
 int32_t field::get_attack_target(card* pcard, card_vector* v, bool chain_attack, bool select_target, std::multimap<effect*, card*>* must_attack_map) {
 	pcard->direct_attackable = 0;
 	uint8_t p = pcard->current.controler;
-	auto outside_selected_3v1_field = [&](const card* target) {
-		return target && multiplayer.mode() == MultiplayerMode::THREE_V_ONE && p == 1
-			&& core.attack_target_duelist < multiplayer.field_count(0)
+	uint8_t target_side = static_cast<uint8_t>(1 - p);
+	uint8_t target_duelist = core.attack_target_duelist;
+	if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+			&& multiplayer.is_active(core.attack_target_logical)) {
+		target_side = multiplayer.field_side_of(core.attack_target_logical);
+		target_duelist = multiplayer.duelist_index_of(core.attack_target_logical);
+	}
+	auto outside_selected_field = [&](const card* target) {
+		if(!target)
+			return false;
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE)
+			return target->current.controler != target_side || target->current.duelist != target_duelist;
+		return multiplayer.mode() == MultiplayerMode::THREE_V_ONE && p == 1
+			&& target_duelist < multiplayer.field_count(0)
 			&& target->current.controler == 0
-			&& target->current.duelist != core.attack_target_duelist;
+			&& target->current.duelist != target_duelist;
 	};
 	card_vector auto_attack, only_attack, must_attack, attack_tg;
-	for(auto& atarget : player[1 - p].list_mzone) {
-		if(atarget && !outside_selected_3v1_field(atarget)) {
+	for(auto& atarget : player[target_side].list_mzone) {
+		if(atarget && !outside_selected_field(atarget)) {
 			if(atarget->is_affected_by_effect(EFFECT_ONLY_BE_ATTACKED))
 				auto_attack.push_back(atarget);
 			if(pcard->is_affected_by_effect(EFFECT_ONLY_ATTACK_MONSTER, atarget))
@@ -2727,10 +2742,12 @@ int32_t field::get_attack_target(card* pcard, card_vector* v, bool chain_attack,
 		pv = &must_attack;
 	} else {
 		atype = 4;
-		for(auto& atarget : player[1 - p].list_mzone)
-			if(atarget != core.attacker && !outside_selected_3v1_field(atarget))
+		for(auto& atarget : player[target_side].list_mzone)
+			if(atarget != core.attacker && !outside_selected_field(atarget))
 				attack_tg.push_back(atarget);
-		if(is_player_affected_by_effect(p, EFFECT_SELF_ATTACK) && (!pcard->is_affected_by_effect(EFFECT_ATTACK_ALL) || !attack_tg.size())) {
+		if(multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE
+				&& is_player_affected_by_effect(p, EFFECT_SELF_ATTACK)
+				&& (!pcard->is_affected_by_effect(EFFECT_ATTACK_ALL) || !attack_tg.size())) {
 			for(auto& atarget : player[p].list_mzone)
 				if (atarget != core.attacker)
 					attack_tg.push_back(atarget);
@@ -2785,7 +2802,8 @@ int32_t field::get_attack_target(card* pcard, card_vector* v, bool chain_attack,
 			continue;
 		if(atype >= 2 && atarget->is_affected_by_effect(EFFECT_IGNORE_BATTLE_TARGET, pcard))
 			continue;
-		if(atarget->current.controler != p)
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+				|| atarget->current.controler != p)
 			++mcount;
 		if(chain_attack && core.chain_attack_target && atarget != core.chain_attack_target)
 			continue;

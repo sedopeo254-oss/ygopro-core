@@ -73,6 +73,8 @@ uint8_t MultiplayerState::field_count(uint8_t field_side) const {
 		return 0;
 	if(duel_mode == MultiplayerMode::THREE_V_ONE)
 		return field_side == 0 ? 3 : 1;
+	if(duel_mode == MultiplayerMode::BATTLE_ROYALE)
+		return 2;
 	return 1;
 }
 
@@ -100,27 +102,31 @@ uint8_t MultiplayerState::logical_player(uint8_t field_side, uint8_t duelist_ind
 uint8_t MultiplayerState::prompt_player_of(uint8_t player) const {
 	if(player >= MAX_PLAYERS || !enabled())
 		return NO_PLAYER;
+	if(duel_mode == MultiplayerMode::BATTLE_ROYALE)
+		return static_cast<uint8_t>(player + 2);
 	if(duel_mode == MultiplayerMode::THREE_V_ONE && player < 3)
 		return static_cast<uint8_t>(player + 2);
 	return field_side_of(player);
 }
 
 uint32_t MultiplayerState::encode_zone_sequence(uint8_t field_side, uint8_t duelist_index, uint8_t stride, uint32_t local_sequence) const {
-	if(duel_mode != MultiplayerMode::THREE_V_ONE || field_side != 0 || !stride || local_sequence >= stride)
+	if(!enabled() || field_count(field_side) <= 1 || duelist_index >= field_count(field_side)
+			|| !stride || local_sequence >= stride)
 		return local_sequence;
 	return static_cast<uint32_t>(duelist_index) * stride + local_sequence;
 }
 
 uint32_t MultiplayerState::local_zone_sequence(uint8_t field_side, uint8_t stride, uint32_t sequence) const {
-	if(duel_mode != MultiplayerMode::THREE_V_ONE || field_side != 0 || !stride)
+	if(!enabled() || field_count(field_side) <= 1 || !stride)
 		return sequence;
 	return sequence % stride;
 }
 
 uint8_t MultiplayerState::zone_duelist_index(uint8_t field_side, uint8_t stride, uint32_t sequence) const {
-	if(duel_mode != MultiplayerMode::THREE_V_ONE || field_side != 0 || !stride)
+	if(!enabled() || field_count(field_side) <= 1 || !stride)
 		return 0;
-	return static_cast<uint8_t>(sequence / stride);
+	const auto duelist = static_cast<uint8_t>(sequence / stride);
+	return duelist < field_count(field_side) ? duelist : 0;
 }
 
 uint8_t MultiplayerState::current_player() const {

@@ -26,6 +26,19 @@ void test_battle_royale_turn_order_and_skip() {
 		"A1 and A2 must use field side 0");
 	expect(state.field_side_of(2) == 1 && state.field_side_of(3) == 1,
 		"B1 and B2 must use field side 1");
+	expect(state.field_count(0) == 2 && state.field_count(1) == 2,
+		"Battle Royale must preserve two independent fields on each core side");
+	expect(state.encode_zone_sequence(0, 0, 7, 3) == 3
+		&& state.encode_zone_sequence(0, 1, 7, 3) == 10
+		&& state.encode_zone_sequence(1, 0, 8, 4) == 4
+		&& state.encode_zone_sequence(1, 1, 8, 4) == 12,
+		"Battle Royale players sharing a core side must receive distinct internal zones");
+	expect(state.local_zone_sequence(1, 8, 12) == 4
+			&& state.zone_duelist_index(1, 8, 12) == 1,
+		"Battle Royale internal zones must decode to the correct local field");
+	expect(state.prompt_player_of(0) == 2 && state.prompt_player_of(1) == 3
+			&& state.prompt_player_of(2) == 4 && state.prompt_player_of(3) == 5,
+		"Battle Royale prompts must route to each logical player's own client");
 	expect(state.logical_player(1, 0) == 2 && state.logical_player(1, 1) == 3,
 		"Battle Royale side-1 duelist mapping must be stable");
 

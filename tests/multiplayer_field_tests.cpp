@@ -201,6 +201,95 @@ int main() {
 	expect(field.get_logical_lp(0, 0) == serenity_lp - 100,
 		"non-interceptable batch damage must affect the selected logical player");
 
+	OCG_DuelOptions royale_options = options;
+	royale_options.flags = DUEL_BATTLE_ROYALE;
+	bool royale_valid_lua = true;
+	duel royale(royale_options, royale_valid_lua);
+	expect(royale_valid_lua, "the Battle Royale Lua runtime must initialize");
+	auto& royale_field = *royale.game_field;
+	expect(royale_field.player[0].list_mzone.size() == 14
+			&& royale_field.player[1].list_mzone.size() == 14,
+		"Battle Royale must allocate two monster fields on both core sides");
+	expect(royale_field.player[0].list_szone.size() == 16
+			&& royale_field.player[1].list_szone.size() == 16,
+		"Battle Royale must allocate two spell/trap fields on both core sides");
+	initialize_extra_duelist(royale, 1, 4001);
+	const OCG_NewCardInfo side1_extra{
+		1,
+		1,
+		4002,
+		0,
+		LOCATION_DECK,
+		0,
+		POS_FACEDOWN_DEFENSE
+	};
+	OCG_DuelNewCard(&royale, &side1_extra);
+
+	auto* kaiba = royale.new_card(4100);
+	kaiba->owner = 0;
+	kaiba->owner_duelist = 0;
+	royale_field.add_card(0, kaiba, LOCATION_MZONE, 0, false, 0);
+	auto* yugi = royale.new_card(4101);
+	yugi->owner = 0;
+	yugi->owner_duelist = 1;
+	expect(royale_field.tag_swap_to(0, 1), "side 0 must switch to Yugi before he uses his field");
+	royale_field.add_card(0, yugi, LOCATION_MZONE, 0);
+	auto* marik = royale.new_card(4102);
+	marik->owner = 1;
+	marik->owner_duelist = 0;
+	royale_field.add_card(1, marik, LOCATION_MZONE, 0, false, 0);
+	auto* joey = royale.new_card(4103);
+	joey->owner = 1;
+	joey->owner_duelist = 1;
+	expect(royale_field.tag_swap_to(1, 1), "side 1 must switch to Joey before he uses his field");
+	royale_field.add_card(1, joey, LOCATION_MZONE, 0);
+	expect(kaiba->current.sequence == 0 && yugi->current.sequence == 7
+			&& marik->current.sequence == 0 && joey->current.sequence == 7,
+		"all four Battle Royale players must keep zone 0 on their own saved field");
+	expect(royale_field.player[0].list_mzone[0] == kaiba
+			&& royale_field.player[0].list_mzone[7] == yugi
+			&& royale_field.player[1].list_mzone[0] == marik
+			&& royale_field.player[1].list_mzone[7] == joey,
+		"switching turns must not merge a Battle Royale player's field with another player");
+	auto* yugi_effect = royale.new_effect();
+	yugi_effect->owner = yugi;
+	yugi_effect->handler = yugi;
+	royale_field.core.reason_effect = yugi_effect;
+	expect(royale_field.get_response_player(0) == 3,
+		"an effect on Yugi's saved field must prompt Yugi rather than Kaiba");
+	auto* joey_effect = royale.new_effect();
+	joey_effect->owner = joey;
+	joey_effect->handler = joey;
+	royale_field.core.reason_effect = joey_effect;
+	expect(royale_field.get_response_player(1) == 5,
+		"an effect on Joey's saved field must prompt Joey rather than Marik");
+	royale_field.core.reason_effect = nullptr;
+	expect(royale_field.tag_swap_to(0, 0), "the visible side-0 resources must switch back to Kaiba");
+	royale_field.core.attacker = kaiba;
+	royale_field.core.attack_target_logical = 1;
+	card_vector royale_targets;
+	royale_field.get_attack_target(kaiba, &royale_targets);
+	expect(royale_targets.size() == 1 && royale_targets.front() == yugi,
+		"Kaiba must be able to select Yugi even though both share core side 0");
+	royale_field.core.attack_target_logical = 3;
+	royale_targets.clear();
+	royale_field.get_attack_target(kaiba, &royale_targets);
+	expect(royale_targets.size() == 1 && royale_targets.front() == joey,
+		"Kaiba must be able to switch the projected opponent field to Joey");
+	royale_field.get_logical_lp(0, 0) = 4000;
+	royale_field.get_logical_lp(0, 1) = 3000;
+	royale_field.get_logical_lp(1, 0) = 2000;
+	royale_field.get_logical_lp(1, 1) = 1000;
+	expect(royale_field.get_logical_lp(0, 0) == 4000
+			&& royale_field.get_logical_lp(0, 1) == 3000
+			&& royale_field.get_logical_lp(1, 0) == 2000
+			&& royale_field.get_logical_lp(1, 1) == 1000,
+		"Battle Royale life points must remain independent for all four players");
+	expect(royale_field.tag_swap_to(0, 1), "the visible side-0 resources must switch to Yugi again");
+	expect(royale_field.player[0].list_mzone[0] == kaiba
+			&& royale_field.player[0].list_mzone[7] == yugi,
+		"a Battle Royale tag swap must preserve both saved monster fields");
+
 	std::cout << "All multiplayer field tests passed.\n";
 	return 0;
 }

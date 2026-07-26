@@ -450,6 +450,8 @@ public:
 	uint32_t& get_logical_disabled_location(uint8_t playerid, uint8_t duelist);
 	uint32_t& get_logical_extra_p_count(uint8_t playerid, uint8_t duelist);
 	int32_t& get_logical_lp(uint8_t playerid, uint8_t duelist);
+	void publish_multiplayer_private_piles(uint8_t logical_player);
+	void publish_all_multiplayer_private_piles();
 	uint8_t get_effect_duelist(uint8_t playerid) const;
 	uint8_t get_response_player(uint8_t playerid) const;
 	int32_t is_field_location_valid(uint32_t location, uint32_t sequence);

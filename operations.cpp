@@ -533,6 +533,10 @@ bool field::process(Processors::Draw& arg) {
 				auto message = pduel->new_message(MSG_MULTIPLAYER_DRAW);
 				message->write<uint8_t>(multiplayer.logical_player(playerid, duelist));
 				message->write<uint32_t>(drawn);
+				for(const auto& pcard : cv) {
+					message->write<uint32_t>(pcard->data.code);
+					message->write<uint32_t>(pcard->current.position);
+				}
 			}
 			if(duelist == player[playerid].current_duelist
 					&& core.deck_reversed && (public_count < drawn)) {
@@ -589,14 +593,28 @@ bool field::process(Processors::Damage& arg) {
 	auto is_step = arg.is_step;
 	switch(arg.step) {
 	case 0: {
-		if(arg.allow_interception && !arg.interception_offered && multiplayer.mode() == MultiplayerMode::THREE_V_ONE
-				&& playerid == 0 && (reason & REASON_EFFECT) && !(reason & REASON_BATTLE) && amount > 0) {
+		const bool interceptable_effect_damage = arg.allow_interception && !arg.interception_offered
+			&& (reason & REASON_EFFECT) && !(reason & REASON_BATTLE) && amount > 0;
+		const bool three_vs_one_interception = multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+			&& playerid == 0;
+		const bool battle_royale_interception = multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE;
+		if(interceptable_effect_damage && (three_vs_one_interception || battle_royale_interception)) {
 			arg.interception_offered = true;
 			arg.interceptors.clear();
-			for(uint8_t logical_player = 0; logical_player < 3; ++logical_player) {
-				if(multiplayer.is_active(logical_player)
-						&& multiplayer.duelist_index_of(logical_player) != duelist)
-					arg.interceptors.push_back(logical_player);
+			const auto victim_logical = multiplayer.logical_player(playerid, duelist);
+			uint8_t source_logical = MultiplayerState::NO_PLAYER;
+			const auto* source_card = reason_card ? reason_card
+				: reason_effect ? reason_effect->get_handler() : nullptr;
+			if(source_card && source_card->current.controler < 2)
+				source_logical = multiplayer.logical_player(
+					source_card->current.controler, source_card->current.duelist);
+			const auto last = three_vs_one_interception ? 3u : MultiplayerState::MAX_PLAYERS;
+			for(uint8_t logical_player = 0; logical_player < last; ++logical_player) {
+				if(!multiplayer.is_active(logical_player)
+						|| logical_player == victim_logical
+						|| (battle_royale_interception && logical_player == source_logical))
+					continue;
+				arg.interceptors.push_back(logical_player);
 			}
 			if(!arg.interceptors.empty()) {
 				arg.interceptor_index = 0;
@@ -703,7 +721,12 @@ bool field::process(Processors::Damage& arg) {
 	}
 	case 20: {
 		if(returns.at<int32_t>(0)) {
-			duelist = multiplayer.duelist_index_of(arg.interceptors[arg.interceptor_index]);
+			const auto logical_player = arg.interceptors[arg.interceptor_index];
+			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+				playerid = multiplayer.field_side_of(logical_player);
+				arg.playerid = playerid;
+			}
+			duelist = multiplayer.duelist_index_of(logical_player);
 			arg.duelist = duelist;
 			arg.step = Processors::restart;
 			return FALSE;

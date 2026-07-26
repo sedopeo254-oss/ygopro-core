@@ -184,6 +184,52 @@ int32_t& field::get_logical_lp(uint8_t playerid, uint8_t duelist) {
 	return index < pinfo.extra_lps.size() ? pinfo.extra_lps[index] : pinfo.lp;
 }
 
+void field::publish_multiplayer_private_piles(uint8_t logical_player) {
+	if(!multiplayer.enabled() || logical_player >= MultiplayerState::MAX_PLAYERS)
+		return;
+	const auto side = multiplayer.field_side_of(logical_player);
+	const auto duelist = multiplayer.duelist_index_of(logical_player);
+	if(side > 1 || duelist == MultiplayerState::NO_PLAYER)
+		return;
+	const auto& deck = get_logical_list(side, LOCATION_DECK, duelist);
+	const auto& hand = get_logical_list(side, LOCATION_HAND, duelist);
+	const auto& extra = get_logical_list(side, LOCATION_EXTRA, duelist);
+	const auto& grave = get_logical_list(side, LOCATION_GRAVE, duelist);
+	const auto& removed = get_logical_list(side, LOCATION_REMOVED, duelist);
+	auto message = pduel->new_message(MSG_MULTIPLAYER_PRIVATE_PILES);
+	message->write<uint8_t>(logical_player);
+	message->write<uint32_t>(deck.size());
+	message->write<uint32_t>(extra.size());
+	message->write<uint32_t>(get_logical_extra_p_count(side, duelist));
+	message->write<uint32_t>(hand.size());
+	message->write<uint32_t>(core.deck_reversed && !deck.empty() ? deck.back()->data.code : 0);
+	for(const auto& pcard : hand) {
+		message->write<uint32_t>(pcard->data.code);
+		message->write<uint32_t>(pcard->current.position);
+	}
+	for(const auto& pcard : extra) {
+		message->write<uint32_t>(pcard->data.code);
+		message->write<uint32_t>(pcard->current.position);
+	}
+	message->write<uint32_t>(grave.size());
+	message->write<uint32_t>(removed.size());
+	for(const auto& pcard : grave) {
+		message->write<uint32_t>(pcard->data.code);
+		message->write<uint32_t>(pcard->current.position);
+	}
+	for(const auto& pcard : removed) {
+		message->write<uint32_t>(pcard->data.code);
+		message->write<uint32_t>(pcard->current.position);
+	}
+}
+
+void field::publish_all_multiplayer_private_piles() {
+	if(!multiplayer.enabled())
+		return;
+	for(uint8_t logical_player = 0; logical_player < MultiplayerState::MAX_PLAYERS; ++logical_player)
+		publish_multiplayer_private_piles(logical_player);
+}
+
 uint8_t field::get_effect_duelist(uint8_t playerid) const {
 	if(!multiplayer.enabled() || playerid > 1 || !core.reason_effect)
 		return player[playerid].current_duelist;

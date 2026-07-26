@@ -281,10 +281,51 @@ int main() {
 	royale_field.get_logical_lp(1, 0) = 2000;
 	royale_field.get_logical_lp(1, 1) = 1000;
 	expect(royale_field.get_logical_lp(0, 0) == 4000
-			&& royale_field.get_logical_lp(0, 1) == 3000
-			&& royale_field.get_logical_lp(1, 0) == 2000
-			&& royale_field.get_logical_lp(1, 1) == 1000,
-		"Battle Royale life points must remain independent for all four players");
+				&& royale_field.get_logical_lp(0, 1) == 3000
+				&& royale_field.get_logical_lp(1, 0) == 2000
+				&& royale_field.get_logical_lp(1, 1) == 1000,
+			"Battle Royale life points must remain independent for all four players");
+	royale_field.core.subunits.clear();
+	royale_field.infos.turn_player = 0;
+	royale_field.core.attacker = kaiba;
+	royale_field.core.attack_target_logical = 2;
+	royale_field.core.attack_target_duelist = 0;
+	Processors::BattleCommand royale_attack(4);
+	expect(!royale_field.process(royale_attack),
+		"Battle Royale attack selection must pause for Let me take it");
+	auto* royale_attack_prompt =
+		Processors::get_opt_variant<Processors::SelectYesNo>(royale_field.core.subunits.back());
+	expect(royale_attack_prompt && royale_attack_prompt->playerid == 3,
+		"Battle Royale attack interception must prompt the first eligible logical seat");
+	royale_field.returns.set<int32_t>(0, 1);
+	royale_attack.step = 44;
+	expect(!royale_field.process(royale_attack)
+			&& royale_field.core.attack_target_logical == 1
+			&& royale_field.core.attack_target_duelist == 1,
+		"Let me take it must redirect the attack to the accepting Battle Royale player");
+	royale_field.core.subunits.clear();
+	Processors::Damage royale_effect_damage(
+		0, nullptr, REASON_EFFECT, 0, kaiba, 1, 600, false, 0, true);
+	expect(!royale_field.process(royale_effect_damage),
+		"Battle Royale effect damage must pause for Let me take it");
+	auto* royale_intercept_prompt =
+		Processors::get_opt_variant<Processors::SelectYesNo>(royale_field.core.subunits.back());
+	expect(royale_intercept_prompt && royale_intercept_prompt->playerid == 3,
+		"Battle Royale must offer interception to the first eligible logical player");
+	royale_field.returns.set<int32_t>(0, 1);
+	royale_effect_damage.step = 20;
+	expect(!royale_field.process(royale_effect_damage)
+			&& royale_effect_damage.playerid == 0
+			&& royale_effect_damage.duelist == 1,
+		"Battle Royale interception must redirect damage to the accepting player's own LP");
+	const auto yugi_lp = royale_field.get_logical_lp(0, 1);
+	royale_effect_damage.step = 0;
+	expect(!royale_field.process(royale_effect_damage),
+		"redirected Battle Royale damage must resume without another prompt");
+	royale_effect_damage.step = 1;
+	expect(!royale_field.process(royale_effect_damage)
+			&& royale_field.get_logical_lp(0, 1) == yugi_lp - 600,
+		"accepted Battle Royale interception must reduce only the interceptor's LP");
 	expect(royale_field.tag_swap_to(0, 1), "the visible side-0 resources must switch to Yugi again");
 	expect(royale_field.player[0].list_mzone[0] == kaiba
 			&& royale_field.player[0].list_mzone[7] == yugi,

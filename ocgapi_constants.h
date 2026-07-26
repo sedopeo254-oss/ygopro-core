@@ -303,6 +303,7 @@
 #define MSG_MULTIPLAYER_NEW_TURN 192
 #define MSG_MULTIPLAYER_DRAW     193
 #define MSG_MULTIPLAYER_DECK_MASTER 194
+#define MSG_MULTIPLAYER_PRIVATE_PILES 195
 
 /* Synthetic option descriptions used by the multiplayer UI. */
 #define MULTIPLAYER_OPTION_PLAYER_BASE 0xfffffff000000000ULL

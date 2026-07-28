@@ -171,6 +171,11 @@ void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player
 				&& multiplayer.mode() == MultiplayerMode::THREE_V_ONE && playerid == 0
 				&& core.attack_target_duelist < multiplayer.field_count(0))
 			duelist = core.attack_target_duelist;
+		else if(multiplayer.enabled() && reason_effect) {
+			const auto* handler = reason_effect->get_handler();
+			duelist = handler && handler->current.controler == playerid
+				? handler->current.duelist : player[playerid].current_duelist;
+		}
 		else
 			duelist = player[playerid].current_duelist;
 	}
@@ -178,8 +183,11 @@ void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player
 		duelist, allow_interception);
 }
 void field::recover(effect* reason_effect, uint32_t reason, uint32_t reason_player, uint32_t playerid, uint32_t amount, bool is_step, uint8_t duelist) {
-	if(duelist == 0xff)
-		duelist = player[playerid].current_duelist;
+	if(duelist == 0xff) {
+		const auto* handler = reason_effect ? reason_effect->get_handler() : nullptr;
+		duelist = multiplayer.enabled() && handler && handler->current.controler == playerid
+			? handler->current.duelist : player[playerid].current_duelist;
+	}
 	emplace_process<Processors::Recover>(reason_effect, reason, reason_player, playerid, amount, is_step, duelist);
 }
 void field::summon(uint8_t sumplayer, card* target, effect* proc, bool ignore_count, uint8_t min_tribute, uint32_t zone) {
@@ -628,7 +636,7 @@ bool field::process(Processors::Damage& arg) {
 		if(amount == 0)
 			return TRUE;
 		if(!(reason & REASON_RDAMAGE)) {
-			filter_player_effect(playerid, EFFECT_REVERSE_DAMAGE, &eset);
+			filter_player_effect(playerid, EFFECT_REVERSE_DAMAGE, &eset, true, duelist);
 			for(const auto& peff : eset) {
 				pduel->lua->add_param<LuaParam::EFFECT>(reason_effect);
 				pduel->lua->add_param<LuaParam::INT>(reason);
@@ -642,7 +650,7 @@ bool field::process(Processors::Damage& arg) {
 			}
 		}
 		eset.clear();
-		filter_player_effect(playerid, EFFECT_REFLECT_DAMAGE, &eset);
+		filter_player_effect(playerid, EFFECT_REFLECT_DAMAGE, &eset, true, duelist);
 		for(const auto& peff : eset) {
 			pduel->lua->add_param<LuaParam::EFFECT>(reason_effect);
 			pduel->lua->add_param<LuaParam::INT>(amount);
@@ -650,14 +658,30 @@ bool field::process(Processors::Damage& arg) {
 			pduel->lua->add_param<LuaParam::INT>(reason_player);
 			pduel->lua->add_param<LuaParam::CARD>(reason_card);
 			if (peff->check_value_condition(5)) {
-				playerid = 1 - playerid;
+				if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+					const auto* source = reason_card ? reason_card
+						: reason_effect ? reason_effect->get_handler() : nullptr;
+					if(source && source->current.controler < 2) {
+						playerid = source->current.controler;
+						duelist = source->current.duelist;
+						arg.playerid = playerid;
+						arg.duelist = duelist;
+					} else {
+						playerid = 1 - playerid;
+						duelist = player[playerid].current_duelist;
+						arg.playerid = playerid;
+						arg.duelist = duelist;
+					}
+				} else {
+					playerid = 1 - playerid;
+				}
 				arg.is_reflected = true;
 				break;
 			}
 		}
 		uint32_t val = amount;
 		eset.clear();
-		filter_player_effect(playerid, EFFECT_CHANGE_DAMAGE, &eset);
+		filter_player_effect(playerid, EFFECT_CHANGE_DAMAGE, &eset, true, duelist);
 		for(const auto& peff : eset) {
 			pduel->lua->add_param<LuaParam::EFFECT>(reason_effect);
 			pduel->lua->add_param<LuaParam::INT>(val);
@@ -678,9 +702,9 @@ bool field::process(Processors::Damage& arg) {
 		return FALSE;
 	}
 	case 1: {
-		if(arg.is_reflected)
+		if(arg.is_reflected && multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE)
 			playerid = 1 - playerid;
-		if(arg.is_reflected)
+		if(arg.is_reflected && multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE)
 			duelist = player[playerid].current_duelist;
 		if(arg.is_reflected || (reason & REASON_RRECOVER))
 			arg.step = 2;
@@ -758,7 +782,7 @@ bool field::process(Processors::Recover& arg) {
 		if(amount == 0)
 			return TRUE;
 		if(!(reason & REASON_RRECOVER)) {
-			filter_player_effect(playerid, EFFECT_REVERSE_RECOVER, &eset);
+			filter_player_effect(playerid, EFFECT_REVERSE_RECOVER, &eset, true, duelist);
 			for(const auto& peff : eset) {
 				pduel->lua->add_param<LuaParam::EFFECT>(reason_effect);
 				pduel->lua->add_param<LuaParam::INT>(reason);
@@ -808,12 +832,13 @@ bool field::process(Processors::Recover& arg) {
 }
 bool field::process(Processors::PayLPCost& arg) {
 	auto playerid = arg.playerid;
+	auto duelist = arg.duelist;
 	auto cost = arg.cost;
 	switch(arg.step) {
 	case 0: {
 		effect_set eset;
 		int32_t val = cost;
-		filter_player_effect(playerid, EFFECT_LPCOST_CHANGE, &eset);
+		filter_player_effect(playerid, EFFECT_LPCOST_CHANGE, &eset, true, duelist);
 		for(const auto& peff : eset) {
 			pduel->lua->add_param<LuaParam::EFFECT>(core.reason_effect);
 			pduel->lua->add_param<LuaParam::INT>(playerid);
@@ -832,7 +857,7 @@ bool field::process(Processors::PayLPCost& arg) {
 		e.reason_player = playerid;
 		core.select_options.clear();
 		core.select_effects.clear();
-		if(val <= player[playerid].lp) {
+		if(val <= get_logical_lp(playerid, duelist)) {
 			core.select_options.push_back(11);
 			core.select_effects.push_back(nullptr);
 		}
@@ -840,6 +865,11 @@ bool field::process(Processors::PayLPCost& arg) {
 		for(auto eit = pr.first; eit != pr.second;) {
 			effect* peffect = eit->second;
 			++eit;
+			const auto* handler = peffect->get_handler();
+			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE && handler
+					&& handler->current.controler == playerid
+					&& handler->current.duelist != duelist)
+				continue;
 			if(peffect->is_activateable(peffect->get_handler_player(), e)) {
 				core.select_options.push_back(peffect->description);
 				core.select_effects.push_back(peffect);
@@ -858,10 +888,12 @@ bool field::process(Processors::PayLPCost& arg) {
 	case 1: {
 		effect* peffect = core.select_effects[returns.at<int32_t>(0)];
 		if(!peffect) {
-			player[playerid].lp -= cost;
+			get_logical_lp(playerid, duelist) -= cost;
 			auto message = pduel->new_message(MSG_PAY_LPCOST);
 			message->write<uint8_t>(playerid);
 			message->write<uint32_t>(cost);
+			if(multiplayer.enabled())
+				message->write<uint8_t>(multiplayer.logical_player(playerid, duelist));
 			raise_event(nullptr, EVENT_PAY_LPCOST, core.reason_effect, 0, playerid, playerid, cost);
 			process_instant_event();
 			return TRUE;

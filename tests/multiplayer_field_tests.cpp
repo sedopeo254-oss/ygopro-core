@@ -330,6 +330,80 @@ int main() {
 	expect(royale_field.player[0].list_mzone[0] == kaiba
 			&& royale_field.player[0].list_mzone[7] == yugi,
 		"a Battle Royale tag swap must preserve both saved monster fields");
+	kaiba->current.position = POS_FACEUP_ATTACK;
+	yugi->current.position = POS_FACEUP_ATTACK;
+	marik->current.position = POS_FACEUP_ATTACK;
+	joey->current.position = POS_FACEUP_ATTACK;
+	auto* yugi_self_aura = royale.new_effect();
+	yugi_self_aura->owner = yugi;
+	yugi_self_aura->handler = yugi;
+	yugi_self_aura->type = EFFECT_TYPE_FIELD;
+	yugi_self_aura->s_range = LOCATION_MZONE;
+	expect(yugi_self_aura->is_target(yugi) && !yugi_self_aura->is_target(kaiba),
+		"a Battle Royale self-range effect must not affect a same-core opponent");
+	card_set self_aura_targets;
+	royale_field.filter_affected_cards(yugi_self_aura, &self_aura_targets);
+	expect(self_aura_targets.size() == 1 && self_aura_targets.count(yugi) == 1,
+		"a self-range aura must contain only its logical owner's field");
+	auto* yugi_opponent_aura = royale.new_effect();
+	yugi_opponent_aura->owner = yugi;
+	yugi_opponent_aura->handler = yugi;
+	yugi_opponent_aura->type = EFFECT_TYPE_FIELD;
+	yugi_opponent_aura->o_range = LOCATION_MZONE;
+	card_set opponent_aura_targets;
+	royale_field.filter_affected_cards(yugi_opponent_aura, &opponent_aura_targets);
+	expect(opponent_aura_targets.size() == 3
+			&& opponent_aura_targets.count(kaiba) == 1
+			&& opponent_aura_targets.count(marik) == 1
+			&& opponent_aura_targets.count(joey) == 1,
+		"an opponent-range aura must affect all three Battle Royale opponents");
+	auto configure_shared_hopt = [](effect* peffect, card* handler) {
+		peffect->owner = handler;
+		peffect->handler = handler;
+		peffect->flag[0] = EFFECT_FLAG_COUNT_LIMIT;
+		peffect->count_limit = 1;
+		peffect->count_limit_max = 1;
+		peffect->count_code = 420042;
+	};
+	auto* yugi_hopt = royale.new_effect();
+	auto* kaiba_hopt = royale.new_effect();
+	configure_shared_hopt(yugi_hopt, yugi);
+	configure_shared_hopt(kaiba_hopt, kaiba);
+	yugi_hopt->dec_count(0);
+	expect(!yugi_hopt->check_count_limit(0) && kaiba_hopt->check_count_limit(0),
+		"once-per-player effect counts must not be shared by same-core Battle Royale players");
+	auto add_spell = [&](uint8_t side, uint8_t duelist, uint32_t code) {
+		auto* spell = royale.new_card(code);
+		spell->data.type = TYPE_SPELL;
+		spell->owner = side;
+		spell->owner_duelist = duelist;
+		royale_field.add_card(side, spell, LOCATION_SZONE, 0, false, duelist);
+		return spell;
+	};
+	auto* kaiba_message = add_spell(0, 0, 4200);
+	auto* yugi_message = add_spell(0, 1, 4201);
+	auto* marik_message = add_spell(1, 0, 4202);
+	auto* joey_message = add_spell(1, 1, 4203);
+	(void)kaiba_message;
+	(void)yugi_message;
+	(void)marik_message;
+	(void)joey_message;
+	royale_field.core.reason_effect = yugi_effect;
+	expect(royale_field.filter_field_card(0, LOCATION_SZONE, 0, nullptr) == 1,
+		"a Battle Royale win condition must count only the activating player's spell/trap field");
+	auto own_matching_group = royale.new_group();
+	royale_field.filter_matching_card(0, 0, LOCATION_SZONE, 0,
+		own_matching_group, nullptr, nullptr, 0);
+	expect(own_matching_group->container.size() == 1,
+		"Battle Royale matching groups must not combine same-core spell/trap fields");
+	expect(royale_field.filter_field_card(0, 0, LOCATION_SZONE, nullptr) == 3,
+		"an opponent field query must include all three Battle Royale opponents");
+	auto opposing_matching_group = royale.new_group();
+	royale_field.filter_matching_card(0, 0, 0, LOCATION_SZONE,
+		opposing_matching_group, nullptr, nullptr, 0);
+	expect(opposing_matching_group->container.size() == 3,
+		"Battle Royale matching groups must expose every legal opposing field");
+	royale_field.core.reason_effect = nullptr;
 
 	std::cout << "All multiplayer field tests passed.\n";
 	return 0;

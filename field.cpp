@@ -1449,6 +1449,8 @@ void field::tag_swap(uint8_t playerid) {
 		message = pduel->new_message(MSG_LPUPDATE);
 		message->write<uint8_t>(playerid);
 		message->write<uint32_t>(player[playerid].lp);
+		message->write<uint8_t>(multiplayer.logical_player(
+			playerid, player[playerid].current_duelist));
 	}
 }
 bool field::tag_swap_to(uint8_t playerid, uint8_t duelist) {
@@ -1527,6 +1529,9 @@ void field::next_player(uint8_t playerid) {
 	message = pduel->new_message(MSG_LPUPDATE);
 	message->write<uint8_t>(playerid);
 	message->write<uint32_t>(player[playerid].start_lp);
+	if(multiplayer.enabled())
+		message->write<uint8_t>(multiplayer.logical_player(
+			playerid, player[playerid].current_duelist));
 	player[playerid].recharge = false;
 }
 bool field::is_flag(uint64_t flag) const {
@@ -1783,6 +1788,42 @@ void field::filter_affected_cards(effect* peffect, card_set* cset) {
 	uint8_t self = peffect->get_handler_player();
 	if(self == PLAYER_NONE)
 		return;
+	if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE && peffect->get_handler()) {
+		const auto* handler = peffect->get_handler();
+		const auto handler_logical = multiplayer.logical_player(
+			handler->current.controler, handler->current.duelist);
+		auto add_if_target = [&](card* pcard) {
+			if(!pcard)
+				return;
+			const auto logical = multiplayer.logical_player(
+				pcard->current.controler, pcard->current.duelist);
+			if(multiplayer.is_active(logical) && peffect->is_target(pcard))
+				cset->insert(pcard);
+		};
+		for(uint8_t side = 0; side < 2; ++side) {
+			for(auto* pcard : player[side].list_mzone)
+				add_if_target(pcard);
+			for(auto* pcard : player[side].list_szone)
+				add_if_target(pcard);
+		}
+		constexpr uint8_t private_locations[] = {
+			LOCATION_GRAVE, LOCATION_REMOVED, LOCATION_HAND, LOCATION_DECK, LOCATION_EXTRA
+		};
+		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
+			if(!multiplayer.is_active(logical))
+				continue;
+			const auto range = logical == handler_logical ? peffect->s_range : peffect->o_range;
+			const auto side = multiplayer.field_side_of(logical);
+			const auto duelist = multiplayer.duelist_index_of(logical);
+			for(const auto location : private_locations) {
+				if(!(range & location))
+					continue;
+				for(auto* pcard : get_logical_list(side, location, duelist))
+					add_if_target(pcard);
+			}
+		}
+		return;
+	}
 	std::vector<card_vector*> cvec;
 	uint16_t range = peffect->s_range;
 	for(uint32_t p = 0; p < 2; ++p) {
@@ -1818,6 +1859,55 @@ void field::filter_inrange_cards(effect* peffect, card_set* cset) {
 	uint8_t self = peffect->get_handler_player();
 	if(self == PLAYER_NONE)
 		return;
+	if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE && peffect->get_handler()) {
+		const auto* handler = peffect->get_handler();
+		const auto handler_logical = multiplayer.logical_player(
+			handler->current.controler, handler->current.duelist);
+		auto add_if_fit = [&](card* pcard, uint16_t range) {
+			if(!pcard)
+				return;
+			const auto logical = multiplayer.logical_player(
+				pcard->current.controler, pcard->current.duelist);
+			if(multiplayer.is_active(logical) && pcard->current.is_location(range)
+					&& peffect->is_fit_target_function(pcard))
+				cset->insert(pcard);
+		};
+		for(uint8_t side = 0; side < 2; ++side) {
+			for(auto* pcard : player[side].list_mzone) {
+				if(!pcard)
+					continue;
+				const auto logical = multiplayer.logical_player(
+					pcard->current.controler, pcard->current.duelist);
+				add_if_fit(pcard, logical == handler_logical
+					? peffect->s_range : peffect->o_range);
+			}
+			for(auto* pcard : player[side].list_szone) {
+				if(!pcard)
+					continue;
+				const auto logical = multiplayer.logical_player(
+					pcard->current.controler, pcard->current.duelist);
+				add_if_fit(pcard, logical == handler_logical
+					? peffect->s_range : peffect->o_range);
+			}
+		}
+		constexpr uint8_t private_locations[] = {
+			LOCATION_GRAVE, LOCATION_REMOVED, LOCATION_HAND, LOCATION_DECK, LOCATION_EXTRA
+		};
+		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
+			if(!multiplayer.is_active(logical))
+				continue;
+			const auto range = logical == handler_logical ? peffect->s_range : peffect->o_range;
+			const auto side = multiplayer.field_side_of(logical);
+			const auto duelist = multiplayer.duelist_index_of(logical);
+			for(const auto location : private_locations) {
+				if(!(range & location))
+					continue;
+				for(auto* pcard : get_logical_list(side, location, duelist))
+					add_if_fit(pcard, range);
+			}
+		}
+		return;
+	}
 	uint16_t range = peffect->s_range;
 	std::vector<card_vector*> cvec;
 	for(uint32_t p = 0; p < 2; ++p) {
@@ -1847,11 +1937,22 @@ void field::filter_inrange_cards(effect* peffect, card_set* cset) {
 		}
 	}
 }
-void field::filter_player_effect(uint8_t playerid, uint32_t code, effect_set* eset, bool sort) {
+void field::filter_player_effect(uint8_t playerid, uint32_t code, effect_set* eset,
+		bool sort, uint8_t duelist) {
 	auto rg = effects.aura_effect.equal_range(code);
 	for (; rg.first != rg.second; ++rg.first) {
 		effect* peffect = rg.first->second;
-		if (peffect->is_target_player(playerid) && peffect->is_available())
+		bool targets_player = peffect->is_target_player(playerid);
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+				&& duelist != 0xff && !peffect->is_flag(EFFECT_FLAG_ABSOLUTE_TARGET)) {
+			const auto* handler = peffect->get_handler();
+			if(handler) {
+				const bool same_player = handler->current.controler == playerid
+					&& handler->current.duelist == duelist;
+				targets_player = same_player ? peffect->s_range : peffect->o_range;
+			}
+		}
+		if(targets_player && peffect->is_available())
 			eset->push_back(peffect);
 	}
 	if(sort)
@@ -1890,57 +1991,107 @@ int32_t field::filter_matching_card(int32_t findex, uint8_t self, uint32_t locat
 	auto check_list = [](const auto& list, auto func)->bool {
 		return std::find_if(list.begin(), list.end(), func) != list.end();
 	};
-	for(uint32_t p = 0, location = location1; p < 2; ++p, location = location2, self = 1 - self) {
-		const auto logical_duelist = get_effect_duelist(self);
+	struct effect_scope {
+		uint8_t side;
+		uint8_t duelist;
+		uint32_t location;
+	};
+	std::vector<effect_scope> scopes;
+	if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+		const auto origin_duelist = get_effect_duelist(self);
+		const auto origin_logical = multiplayer.logical_player(self, origin_duelist);
+		scopes.push_back({ self, origin_duelist, location1 });
+		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
+			if(logical == origin_logical || !multiplayer.is_active(logical))
+				continue;
+			scopes.push_back({
+				multiplayer.field_side_of(logical),
+				multiplayer.duelist_index_of(logical),
+				location2
+			});
+		}
+	} else {
+		scopes.push_back({ self, get_effect_duelist(self), location1 });
+		scopes.push_back({ static_cast<uint8_t>(1 - self),
+			get_effect_duelist(static_cast<uint8_t>(1 - self)), location2 });
+	}
+	for(const auto& scope : scopes) {
+		const auto side = scope.side;
+		const auto logical_duelist = scope.duelist;
+		const auto location = scope.location;
+		const bool isolate_duelist = multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE;
+		auto scope_mzonechk = [&](auto* pcard) {
+			return (!isolate_duelist || pcard == nullptr
+				|| pcard->current.duelist == logical_duelist) && mzonechk(pcard);
+		};
+		auto scope_szonechk = [&](auto* pcard) {
+			return (!isolate_duelist || pcard == nullptr
+				|| pcard->current.duelist == logical_duelist) && szonechk(pcard);
+		};
+		auto scope_pzonechk = [&](auto* pcard) {
+			return (!isolate_duelist || pcard == nullptr
+				|| pcard->current.duelist == logical_duelist) && pzonechk(pcard);
+		};
 		if(location & LOCATION_MZONE) {
-			if(check_list(player[self].list_mzone, mzonechk))
+			if(check_list(player[side].list_mzone, scope_mzonechk))
 				return TRUE;
 		} else {
 			if(location & LOCATION_MMZONE) {
-				const auto mzonebegin = player[self].list_mzone.cbegin() + get_zone_sequence(self, LOCATION_MZONE, 0);
+				const auto mzonebegin = player[side].list_mzone.cbegin()
+					+ get_zone_sequence(side, LOCATION_MZONE, 0, logical_duelist);
 				const auto mzoneend = mzonebegin + 5;
-				if(std::find_if(mzonebegin, mzoneend, mzonechk) != mzoneend)
+				if(std::find_if(mzonebegin, mzoneend, scope_mzonechk) != mzoneend)
 					return TRUE;
 			}
 			if(location & LOCATION_EMZONE) {
-				auto mzonebegin = player[self].list_mzone.cbegin() + get_zone_sequence(self, LOCATION_MZONE, 5);
+				auto mzonebegin = player[side].list_mzone.cbegin()
+					+ get_zone_sequence(side, LOCATION_MZONE, 5, logical_duelist);
 				auto mzoneend = mzonebegin + 2;
 				if(is_flag(DUEL_3_COLUMNS_FIELD)) {
 					++mzonebegin;
 					--mzoneend;
 				}
-				if(std::find_if(mzonebegin, mzoneend, mzonechk) != mzoneend)
+				if(std::find_if(mzonebegin, mzoneend, scope_mzonechk) != mzoneend)
 					return TRUE;
 			}
 		}
 		if(location & LOCATION_SZONE) {
-			if(check_list(player[self].list_szone, szonechk))
+			if(check_list(player[side].list_szone, scope_szonechk))
 				return TRUE;
 		} else {
 			if(location & LOCATION_STZONE) {
-				auto szonebegin = player[self].list_szone.cbegin() + get_zone_sequence(self, LOCATION_SZONE, 0);
+				auto szonebegin = player[side].list_szone.cbegin()
+					+ get_zone_sequence(side, LOCATION_SZONE, 0, logical_duelist);
 				auto szoneend = szonebegin + 5;
 				if(is_flag(DUEL_3_COLUMNS_FIELD)) {
 					++szonebegin;
 					--szoneend;
 				}
-				if(std::find_if(szonebegin, szoneend, szonechk) != szoneend)
+				if(std::find_if(szonebegin, szoneend, scope_szonechk) != szoneend)
 					return TRUE;
 			}
-			if((location & LOCATION_FZONE) && szonechk(player[self].list_szone[get_zone_sequence(self, LOCATION_SZONE, 5)]))
+			if((location & LOCATION_FZONE)
+					&& scope_szonechk(player[side].list_szone[
+						get_zone_sequence(side, LOCATION_SZONE, 5, logical_duelist)]))
 				return TRUE;
-			if((location & LOCATION_PZONE) && (pzonechk(player[self].list_szone[get_zone_sequence(self, LOCATION_SZONE, get_pzone_index(0, self))]) || pzonechk(player[self].list_szone[get_zone_sequence(self, LOCATION_SZONE, get_pzone_index(1, self))])))
+			if((location & LOCATION_PZONE)
+					&& (scope_pzonechk(player[side].list_szone[
+							get_zone_sequence(side, LOCATION_SZONE,
+								get_pzone_index(0, side), logical_duelist)])
+						|| scope_pzonechk(player[side].list_szone[
+							get_zone_sequence(side, LOCATION_SZONE,
+								get_pzone_index(1, side), logical_duelist)])))
 				return TRUE;
 		}
-		if((location & LOCATION_DECK) && check_list(get_logical_list(self, LOCATION_DECK, logical_duelist), checkc))
+		if((location & LOCATION_DECK) && check_list(get_logical_list(side, LOCATION_DECK, logical_duelist), checkc))
 			return TRUE;
-		if((location & LOCATION_EXTRA) && check_list(get_logical_list(self, LOCATION_EXTRA, logical_duelist), checkc))
+		if((location & LOCATION_EXTRA) && check_list(get_logical_list(side, LOCATION_EXTRA, logical_duelist), checkc))
 			return TRUE;
-		if((location & LOCATION_HAND) && check_list(get_logical_list(self, LOCATION_HAND, logical_duelist), checkc))
+		if((location & LOCATION_HAND) && check_list(get_logical_list(side, LOCATION_HAND, logical_duelist), checkc))
 			return TRUE;
-		if((location & LOCATION_GRAVE) && check_list(get_logical_list(self, LOCATION_GRAVE, logical_duelist), checkc))
+		if((location & LOCATION_GRAVE) && check_list(get_logical_list(side, LOCATION_GRAVE, logical_duelist), checkc))
 			return TRUE;
-		if((location & LOCATION_REMOVED) && check_list(get_logical_list(self, LOCATION_REMOVED, logical_duelist), checkc))
+		if((location & LOCATION_REMOVED) && check_list(get_logical_list(side, LOCATION_REMOVED, logical_duelist), checkc))
 			return TRUE;
 	}
 	return FALSE;
@@ -1949,116 +2100,127 @@ int32_t field::filter_matching_card(int32_t findex, uint8_t self, uint32_t locat
 int32_t field::filter_field_card(uint8_t self, uint32_t location1, uint32_t location2, group* pgroup) {
 	if(self != 0 && self != 1)
 		return 0;
-	uint32_t location = location1;
 	size_t count = 0;
-	for(uint32_t p = 0; p < 2; ++p, location = location2, self = 1 - self) {
-		const auto logical_duelist = get_effect_duelist(self);
+	struct effect_scope {
+		uint8_t side;
+		uint8_t duelist;
+		uint32_t location;
+	};
+	std::vector<effect_scope> scopes;
+	if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+		const auto origin_duelist = get_effect_duelist(self);
+		const auto origin_logical = multiplayer.logical_player(self, origin_duelist);
+		scopes.push_back({ self, origin_duelist, location1 });
+		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
+			if(logical == origin_logical || !multiplayer.is_active(logical))
+				continue;
+			scopes.push_back({
+				multiplayer.field_side_of(logical),
+				multiplayer.duelist_index_of(logical),
+				location2
+			});
+		}
+	} else {
+		scopes.push_back({ self, get_effect_duelist(self), location1 });
+		scopes.push_back({ static_cast<uint8_t>(1 - self),
+			get_effect_duelist(static_cast<uint8_t>(1 - self)), location2 });
+	}
+	for(const auto& scope : scopes) {
+		const auto side = scope.side;
+		const auto logical_duelist = scope.duelist;
+		const auto location = scope.location;
+		const bool isolate_duelist = multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE;
+		auto belongs_to_scope = [&](const card* pcard) {
+			return pcard && (!isolate_duelist
+				|| pcard->current.duelist == logical_duelist);
+		};
+		auto add_card = [&](card* pcard) {
+			if(!belongs_to_scope(pcard))
+				return;
+			if(pgroup)
+				pgroup->container.insert(pcard);
+			++count;
+		};
 		if(location & LOCATION_MZONE) {
-			for(auto& pcard : player[self].list_mzone) {
-				if(pcard && !pcard->get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP)) {
-					if(pgroup)
-						pgroup->container.insert(pcard);
-					++count;
-				}
+			for(auto& pcard : player[side].list_mzone) {
+				if(belongs_to_scope(pcard)
+						&& !pcard->get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
+					add_card(pcard);
 			}
 		} else {
 			if(location & LOCATION_MMZONE) {
-				auto mzonebegin = player[self].list_mzone.cbegin() + get_zone_sequence(self, LOCATION_MZONE, 0);
+				auto mzonebegin = player[side].list_mzone.cbegin()
+					+ get_zone_sequence(side, LOCATION_MZONE, 0, logical_duelist);
 				auto mzoneend = mzonebegin + 5;
 				if(is_flag(DUEL_3_COLUMNS_FIELD)) {
 					++mzonebegin;
 					--mzoneend;
 				}
-				for(; mzonebegin != mzoneend; ++mzonebegin) {
-					auto* pcard = *mzonebegin;
-					if(pcard) {
-						if(pgroup)
-							pgroup->container.insert(pcard);
-						++count;
-					}
-				}
+				for(; mzonebegin != mzoneend; ++mzonebegin)
+					add_card(*mzonebegin);
 			}
 			if(location & LOCATION_EMZONE) {
-				for(auto it = player[self].list_mzone.cbegin() + get_zone_sequence(self, LOCATION_MZONE, 5), end = it + 2; it != end; ++it) {
-					auto* pcard = *it;
-					if(pcard) {
-						if(pgroup)
-							pgroup->container.insert(pcard);
-						++count;
-					}
-				}
+				for(auto it = player[side].list_mzone.cbegin()
+						+ get_zone_sequence(side, LOCATION_MZONE, 5, logical_duelist),
+						end = it + 2; it != end; ++it)
+					add_card(*it);
 			}
 		}
 		if(location & LOCATION_SZONE) {
-			for(auto& pcard : player[self].list_szone) {
-				if(pcard) {
-					if(pgroup)
-						pgroup->container.insert(pcard);
-					++count;
-				}
-			}
+			for(auto& pcard : player[side].list_szone)
+				add_card(pcard);
 		} else {
 			if(location & LOCATION_STZONE) {
-				auto szonebegin = player[self].list_szone.cbegin() + get_zone_sequence(self, LOCATION_SZONE, 0);
+				auto szonebegin = player[side].list_szone.cbegin()
+					+ get_zone_sequence(side, LOCATION_SZONE, 0, logical_duelist);
 				auto szoneend = szonebegin + 5;
 				if(is_flag(DUEL_3_COLUMNS_FIELD)) {
 					++szonebegin;
 					--szoneend;
 				}
-				for(; szonebegin != szoneend; ++szonebegin) {
-					auto* pcard = *szonebegin;
-					if(pcard) {
-						if(pgroup)
-							pgroup->container.insert(pcard);
-						++count;
-					}
-				}
+				for(; szonebegin != szoneend; ++szonebegin)
+					add_card(*szonebegin);
 			}
 			if(location & LOCATION_FZONE) {
-				card* pcard = player[self].list_szone[get_zone_sequence(self, LOCATION_SZONE, 5)];
-				if(pcard) {
-					if(pgroup)
-						pgroup->container.insert(pcard);
-					++count;
-				}
+				add_card(player[side].list_szone[
+					get_zone_sequence(side, LOCATION_SZONE, 5, logical_duelist)]);
 			}
 			if(location & LOCATION_PZONE) {
 				for(int32_t i = 0; i < 2; ++i) {
-					card* pcard = player[self].list_szone[get_zone_sequence(self, LOCATION_SZONE, get_pzone_index(i, self))];
-					if(pcard && pcard->current.pzone) {
-						if(pgroup)
-							pgroup->container.insert(pcard);
-						++count;
-					}
+					card* pcard = player[side].list_szone[
+						get_zone_sequence(side, LOCATION_SZONE,
+							get_pzone_index(i, side), logical_duelist)];
+					if(pcard && pcard->current.pzone)
+						add_card(pcard);
 				}
 			}
 		}
 		if(location & LOCATION_HAND) {
-			auto& list = get_logical_list(self, LOCATION_HAND, logical_duelist);
+			auto& list = get_logical_list(side, LOCATION_HAND, logical_duelist);
 			if(pgroup)
 				pgroup->container.insert(list.begin(), list.end());
 			count += list.size();
 		}
 		if(location & LOCATION_DECK) {
-			auto& list = get_logical_list(self, LOCATION_DECK, logical_duelist);
+			auto& list = get_logical_list(side, LOCATION_DECK, logical_duelist);
 			if(pgroup)
 				pgroup->container.insert(list.rbegin(), list.rend());
 			count += list.size();
 		}
 		if(location & LOCATION_EXTRA) {
-			auto& list = get_logical_list(self, LOCATION_EXTRA, logical_duelist);
+			auto& list = get_logical_list(side, LOCATION_EXTRA, logical_duelist);
 			if(pgroup)
 				pgroup->container.insert(list.rbegin(), list.rend());
 			count += list.size();
 		}
 		if(location & LOCATION_GRAVE) {
-			auto& list = get_logical_list(self, LOCATION_GRAVE, logical_duelist);
+			auto& list = get_logical_list(side, LOCATION_GRAVE, logical_duelist);
 			if(pgroup)
 				pgroup->container.insert(list.rbegin(), list.rend());
 			count += list.size();
 		}
 		if(location & LOCATION_REMOVED) {
-			auto& list = get_logical_list(self, LOCATION_REMOVED, logical_duelist);
+			auto& list = get_logical_list(side, LOCATION_REMOVED, logical_duelist);
 			if(pgroup)
 				pgroup->container.insert(list.rbegin(), list.rend());
 			count += list.size();

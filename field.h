@@ -502,7 +502,8 @@ public:
 	void filter_field_effect(uint32_t code, effect_set* eset, bool sort = true);
 	void filter_affected_cards(effect* peffect, card_set* cset);
 	void filter_inrange_cards(effect* peffect, card_set* cset);
-	void filter_player_effect(uint8_t playerid, uint32_t code, effect_set* eset, bool sort = true);
+	void filter_player_effect(uint8_t playerid, uint32_t code, effect_set* eset,
+		bool sort = true, uint8_t duelist = 0xff);
 	int32_t filter_matching_card(int32_t findex, uint8_t self, uint32_t location1, uint32_t location2, group* pgroup, card* pexception, group* pexgroup, uint32_t extraargs, card** pret = nullptr, int32_t fcount = 0, bool is_target = false);
 	int32_t filter_field_card(uint8_t self, uint32_t location, uint32_t location2, group* pgroup);
 	effect* is_player_affected_by_effect(uint8_t playerid, uint32_t code);

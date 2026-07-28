@@ -1450,6 +1450,12 @@ bool field::process(Processors::IdleCommand& arg) {
 	switch(arg.step) {
 	case 0: {
 		bool must_attack = false;
+		const auto current_duelist = player[infos.turn_player].current_duelist;
+		auto belongs_to_turn_duelist = [&](const card* pcard) {
+			return multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE || !pcard
+				|| pcard->current.controler != infos.turn_player
+				|| pcard->current.duelist == current_duelist;
+		};
 		core.select_chains.clear();
 		nil_event.event_code = EVENT_FREE_CHAIN;
 		if(core.set_forced_attack) {
@@ -1464,7 +1470,9 @@ bool field::process(Processors::IdleCommand& arg) {
 			core.to_bp = false;
 		if(infos.phase == PHASE_MAIN1) {
 			for(auto& pcard : player[infos.turn_player].list_mzone) {
-				if(pcard && pcard->is_capable_attack() && pcard->is_affected_by_effect(EFFECT_MUST_ATTACK)) {
+				if(pcard && belongs_to_turn_duelist(pcard)
+						&& pcard->is_capable_attack()
+						&& pcard->is_affected_by_effect(EFFECT_MUST_ATTACK)) {
 					must_attack = true;
 					break;
 				}
@@ -1502,7 +1510,8 @@ bool field::process(Processors::IdleCommand& arg) {
 		for(auto eit = pr.first; eit != pr.second; eit++) {
 			effect* peffect = eit->second;
 			peffect->set_activate_location();
-			if(peffect->is_activateable(infos.turn_player, nil_event)) {
+			if(belongs_to_turn_duelist(peffect->get_handler())
+					&& peffect->is_activateable(infos.turn_player, nil_event)) {
 				core.select_chains.emplace_back().triggering_effect = peffect;
 			}
 		}
@@ -1510,30 +1519,36 @@ bool field::process(Processors::IdleCommand& arg) {
 		for(auto eit = pr.first; eit != pr.second; eit++) {
 			effect* peffect = eit->second;
 			peffect->set_activate_location();
-			if(peffect->is_activateable(infos.turn_player, nil_event)) {
+			if(belongs_to_turn_duelist(peffect->get_handler())
+					&& peffect->is_activateable(infos.turn_player, nil_event)) {
 				core.select_chains.emplace_back().triggering_effect = peffect;
 			}
 		}
 		pr = effects.continuous_effect.equal_range(EVENT_FREE_CHAIN);
 		for(auto eit = pr.first; eit != pr.second; eit++) {
 			effect* peffect = eit->second;
-			if(peffect->get_handler_player() == infos.turn_player && peffect->is_activateable(infos.turn_player, nil_event)) {
+			if(belongs_to_turn_duelist(peffect->get_handler())
+					&& peffect->get_handler_player() == infos.turn_player
+					&& peffect->is_activateable(infos.turn_player, nil_event)) {
 				core.select_chains.emplace_back().triggering_effect = peffect;
 			}
 		}
 		for(auto& eit : effects.ignition_effect) {
 			effect* peffect = eit.second;
 			peffect->set_activate_location();
-			if(peffect->is_activateable(infos.turn_player, nil_event)) {
+			if(belongs_to_turn_duelist(peffect->get_handler())
+					&& peffect->is_activateable(infos.turn_player, nil_event)) {
 				core.select_chains.emplace_back().triggering_effect = peffect;
 			}
 		}
 		core.summonable_cards.clear();
 		for(auto& pcard : player[infos.turn_player].list_hand)
-			if(pcard->is_can_be_summoned(infos.turn_player, FALSE, nullptr, 0))
+			if(belongs_to_turn_duelist(pcard)
+					&& pcard->is_can_be_summoned(infos.turn_player, FALSE, nullptr, 0))
 				core.summonable_cards.push_back(pcard);
 		for(auto& pcard : player[infos.turn_player].list_mzone) {
-			if(pcard && pcard->is_can_be_summoned(infos.turn_player, FALSE, nullptr, 0))
+			if(pcard && belongs_to_turn_duelist(pcard)
+					&& pcard->is_can_be_summoned(infos.turn_player, FALSE, nullptr, 0))
 				core.summonable_cards.push_back(pcard);
 		}
 		core.spsummonable_cards.clear();
@@ -1541,6 +1556,8 @@ bool field::process(Processors::IdleCommand& arg) {
 		filter_field_effect(EFFECT_SPSUMMON_PROC, &eset);
 		for(const auto& peff : eset) {
 			card* pcard = peff->get_handler();
+			if(!belongs_to_turn_duelist(pcard))
+				continue;
 			if(!peff->check_count_limit(pcard->current.controler))
 				continue;
 			if(pcard->current.controler == infos.turn_player && pcard->is_special_summonable(infos.turn_player, 0))
@@ -1550,6 +1567,8 @@ bool field::process(Processors::IdleCommand& arg) {
 		filter_field_effect(EFFECT_SPSUMMON_PROC_G, &eset);
 		for(const auto& peff : eset) {
 			card* pcard = peff->get_handler();
+			if(!belongs_to_turn_duelist(pcard))
+				continue;
 			if(!peff->check_count_limit(infos.turn_player))
 				continue;
 			if(pcard->current.controler != infos.turn_player && !peff->is_flag(EFFECT_FLAG_BOTH_SIDE))
@@ -1569,16 +1588,18 @@ bool field::process(Processors::IdleCommand& arg) {
 		}
 		core.repositionable_cards.clear();
 		for(auto& pcard : player[infos.turn_player].list_mzone) {
-			if(pcard && ((pcard->is_position(POS_FACEUP | POS_FACEDOWN_ATTACK) && pcard->is_capable_change_position(infos.turn_player))
+			if(pcard && belongs_to_turn_duelist(pcard)
+					&& ((pcard->is_position(POS_FACEUP | POS_FACEDOWN_ATTACK) && pcard->is_capable_change_position(infos.turn_player))
 		        || (pcard->is_position(POS_FACEDOWN) && pcard->is_can_be_flip_summoned(infos.turn_player))))
 				core.repositionable_cards.push_back(pcard);
 		}
 		core.msetable_cards.clear();
 		core.ssetable_cards.clear();
 		for(auto& pcard : player[infos.turn_player].list_hand) {
-			if(pcard->is_setable_mzone(infos.turn_player, FALSE, nullptr, 0))
+			if(belongs_to_turn_duelist(pcard)
+					&& pcard->is_setable_mzone(infos.turn_player, FALSE, nullptr, 0))
 				core.msetable_cards.push_back(pcard);
-			if(pcard->is_setable_szone(infos.turn_player))
+			if(belongs_to_turn_duelist(pcard) && pcard->is_setable_szone(infos.turn_player))
 				core.ssetable_cards.push_back(pcard);
 		}
 		emplace_process<Processors::SelectIdleCmd>(infos.turn_player);
@@ -1788,6 +1809,12 @@ bool field::process(Processors::IdleCommand& arg) {
 bool field::process(Processors::BattleCommand& arg) {
 	switch(arg.step) {
 	case 0: {
+		const auto current_duelist = player[infos.turn_player].current_duelist;
+		auto belongs_to_turn_duelist = [&](const card* pcard) {
+			return multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE || !pcard
+				|| pcard->current.controler != infos.turn_player
+				|| pcard->current.duelist == current_duelist;
+		};
 		core.select_chains.clear();
 		nil_event.event_code = EVENT_FREE_CHAIN;
 		if(!core.chain_attack) {
@@ -1823,7 +1850,9 @@ bool field::process(Processors::BattleCommand& arg) {
 		for(auto eit = pr.first; eit != pr.second; eit++) {
 			auto peffect = eit->second;
 			peffect->set_activate_location();
-			if(peffect->is_activateable(infos.turn_player, nil_event) && peffect->get_speed() > 1) {
+			if(belongs_to_turn_duelist(peffect->get_handler())
+					&& peffect->is_activateable(infos.turn_player, nil_event)
+					&& peffect->get_speed() > 1) {
 				core.select_chains.emplace_back().triggering_effect = peffect;
 			}
 		}
@@ -1831,14 +1860,17 @@ bool field::process(Processors::BattleCommand& arg) {
 		for(auto eit = pr.first; eit != pr.second; eit++) {
 			auto peffect = eit->second;
 			peffect->set_activate_location();
-			if(peffect->is_activateable(infos.turn_player, nil_event)) {
+			if(belongs_to_turn_duelist(peffect->get_handler())
+					&& peffect->is_activateable(infos.turn_player, nil_event)) {
 				core.select_chains.emplace_back().triggering_effect = peffect;
 			}
 		}
 		pr = effects.continuous_effect.equal_range(EVENT_FREE_CHAIN);
 		for(auto eit = pr.first; eit != pr.second; eit++) {
 			auto peffect = eit->second;
-			if(peffect->get_handler_player() == infos.turn_player && peffect->is_activateable(infos.turn_player, nil_event)) {
+			if(belongs_to_turn_duelist(peffect->get_handler())
+					&& peffect->get_handler_player() == infos.turn_player
+					&& peffect->is_activateable(infos.turn_player, nil_event)) {
 				core.select_chains.emplace_back().triggering_effect = peffect;
 			}
 		}
@@ -1847,7 +1879,7 @@ bool field::process(Processors::BattleCommand& arg) {
 		card_vector must_attack;
 		if(!is_player_affected_by_effect(infos.turn_player, EFFECT_CANNOT_ATTACK_ANNOUNCE)) {
 			for(auto& pcard : player[infos.turn_player].list_mzone) {
-				if(!pcard)
+				if(!pcard || !belongs_to_turn_duelist(pcard))
 					continue;
 				if(!pcard->is_capable_attack_announce(infos.turn_player))
 					continue;
@@ -2250,7 +2282,11 @@ bool field::process(Processors::BattleCommand& arg) {
 			} else {
 				message->write(loc_info{});
 			}
-			if(multiplayer.enabled())
+			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+				message->write<uint8_t>(multiplayer.logical_player(
+					core.attacker->current.controler, core.attacker->current.duelist));
+				message->write<uint8_t>(core.attack_target_logical);
+			} else if(multiplayer.enabled())
 				message->write<uint8_t>(core.attack_target_logical);
 			core.attack_rollback = false;
 			core.opp_mzone.clear();
@@ -3076,6 +3112,16 @@ bool field::process(Processors::DamageStep& arg) {
 		} else {
 			message->write(loc_info{});
 		}
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+			message->write<uint8_t>(multiplayer.logical_player(
+				core.attacker->current.controler, core.attacker->current.duelist));
+			const auto target_logical = core.attack_target
+				? multiplayer.logical_player(core.attack_target->current.controler,
+					core.attack_target->current.duelist)
+				: core.attack_target_logical;
+			message->write<uint8_t>(target_logical);
+		} else if(multiplayer.enabled())
+			message->write<uint8_t>(core.attack_target_logical);
 		infos.phase = PHASE_DAMAGE;
 		(void)pduel->new_message(MSG_DAMAGE_STEP_START);
 		core.pre_field[0] = core.attacker->fieldid_r;
@@ -4919,6 +4965,8 @@ bool field::process(Processors::Adjust& arg) {
 				auto message = pduel->new_message(MSG_WIN);
 				message->write<uint8_t>(winner);
 				message->write<uint8_t>(lost_by_lp ? 1 : (lost_by_deck ? 2 : 0));
+				if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE)
+					message->write<uint8_t>(multiplayer.winner_player());
 				core.win_player = 5;
 				core.win_reason = 0;
 			} else {
@@ -4931,6 +4979,8 @@ bool field::process(Processors::Adjust& arg) {
 				auto message = pduel->new_message(MSG_WIN);
 				message->write<uint8_t>(core.win_player);
 				message->write<uint8_t>(core.win_reason);
+				if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE)
+					message->write<uint8_t>(multiplayer.winner_player());
 				core.win_player = 5;
 				core.win_reason = 0;
 			}

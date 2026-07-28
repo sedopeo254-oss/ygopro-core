@@ -462,7 +462,9 @@ bool field::process(Processors::SelectChain& arg) {
 	auto playerid = arg.playerid;
 	auto spe_count = arg.spe_count;
 	auto forced = arg.forced;
-	const bool split_team_prompt = multiplayer.mode() == MultiplayerMode::THREE_V_ONE && playerid == 0 && !forced;
+	const bool split_logical_prompt = !forced
+		&& ((multiplayer.mode() == MultiplayerMode::THREE_V_ONE && playerid == 0)
+			|| multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE);
 	auto write_chain = [&](auto* out_message, size_t chain_index) {
 		const auto& ch = *std::next(core.select_chains.begin(), static_cast<ptrdiff_t>(chain_index));
 		effect* peffect = ch.triggering_effect;
@@ -494,13 +496,17 @@ bool field::process(Processors::SelectChain& arg) {
 		if(!arg.multiplayer_initialized) {
 			core.select_chains.sort(chain::chain_operation_sort);
 			arg.multiplayer_initialized = true;
-			if(split_team_prompt) {
-				for(uint8_t logical_player = 0; logical_player < 3; ++logical_player) {
+			if(split_logical_prompt) {
+				for(uint8_t logical_player = 0;
+						logical_player < MultiplayerState::MAX_PLAYERS; ++logical_player) {
+					if(!multiplayer.is_active(logical_player)
+							|| multiplayer.field_side_of(logical_player) != playerid)
+						continue;
 					const auto duelist = multiplayer.duelist_index_of(logical_player);
 					const auto found = std::find_if(core.select_chains.begin(), core.select_chains.end(), [&](const auto& ch) {
 						const auto* handler = ch.triggering_effect->get_handler();
-						const auto effect_duelist = handler && handler->current.controler == 0
-							? handler->current.duelist : player[0].current_duelist;
+						const auto effect_duelist = handler && handler->current.controler == playerid
+							? handler->current.duelist : player[playerid].current_duelist;
 						return effect_duelist == duelist;
 					});
 					if(found != core.select_chains.end())
@@ -510,14 +516,14 @@ bool field::process(Processors::SelectChain& arg) {
 		}
 		arg.chain_indices.clear();
 		uint8_t selecting_player = playerid;
-		if(split_team_prompt && !arg.logical_players.empty()) {
+		if(split_logical_prompt && !arg.logical_players.empty()) {
 			const auto logical_player = arg.logical_players[arg.logical_index];
 			const auto duelist = multiplayer.duelist_index_of(logical_player);
 			size_t chain_index = 0;
 			for(const auto& ch : core.select_chains) {
 				const auto* handler = ch.triggering_effect->get_handler();
-				const auto effect_duelist = handler && handler->current.controler == 0
-					? handler->current.duelist : player[0].current_duelist;
+				const auto effect_duelist = handler && handler->current.controler == playerid
+					? handler->current.duelist : player[playerid].current_duelist;
 				if(effect_duelist == duelist)
 					arg.chain_indices.push_back(chain_index);
 				++chain_index;
@@ -530,7 +536,7 @@ bool field::process(Processors::SelectChain& arg) {
 		message->write<uint8_t>(forced);
 		message->write<uint32_t>(core.hint_timing[playerid]);
 		message->write<uint32_t>(core.hint_timing[1 - playerid]);
-		if(split_team_prompt && !arg.logical_players.empty()) {
+		if(split_logical_prompt && !arg.logical_players.empty()) {
 			message->write<uint32_t>(arg.chain_indices.size());
 			for(const auto chain_index : arg.chain_indices)
 				write_chain(message, chain_index);
@@ -541,7 +547,7 @@ bool field::process(Processors::SelectChain& arg) {
 		}
 		return FALSE;
 	} else {
-		if(split_team_prompt && !arg.logical_players.empty()) {
+		if(split_logical_prompt && !arg.logical_players.empty()) {
 			const auto selected = returns.at<int32_t>(0);
 			if(!forced && selected == -1) {
 				++arg.logical_index;

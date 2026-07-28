@@ -72,7 +72,11 @@ LUA_STATIC_FUNCTION(GetLP) {
 	auto p = lua_get<int8_t>(L, 1);
 	if(p != 0 && p != 1)
 		return 0;
-	lua_pushinteger(L, pduel->game_field->player[p].lp);
+	auto* game_field = pduel->game_field;
+	if(game_field->multiplayer.enabled())
+		lua_pushinteger(L, game_field->get_logical_lp(p, game_field->get_effect_duelist(p)));
+	else
+		lua_pushinteger(L, game_field->player[p].lp);
 	return 1;
 }
 LUA_STATIC_FUNCTION(SetLP) {
@@ -82,10 +86,15 @@ LUA_STATIC_FUNCTION(SetLP) {
 	if(lp < 0) lp = 0;
 	if(p != 0 && p != 1)
 		return 0;
-	pduel->game_field->player[p].lp = lp;
+	auto* game_field = pduel->game_field;
+	const auto duelist = game_field->multiplayer.enabled()
+		? game_field->get_effect_duelist(p) : game_field->player[p].current_duelist;
+	game_field->get_logical_lp(p, duelist) = lp;
 	auto message = pduel->new_message(MSG_LPUPDATE);
 	message->write<uint8_t>(p);
 	message->write<uint32_t>(lp);
+	if(game_field->multiplayer.enabled())
+		message->write<uint8_t>(game_field->multiplayer.logical_player(p, duelist));
 	return 0;
 }
 LUA_STATIC_FUNCTION(GetTurnPlayer) {
@@ -1239,6 +1248,25 @@ LUA_STATIC_FUNCTION(Win) {
 	auto reason = lua_get<uint32_t>(L, 2);
 	if (playerid != 0 && playerid != 1 && playerid != 2)
 		return 0;
+	if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+			&& playerid < 2) {
+		auto& field = *pduel->game_field;
+		const auto winner_duelist = field.get_effect_duelist(playerid);
+		const auto winner_logical = field.multiplayer.logical_player(
+			playerid, winner_duelist);
+		if(field.multiplayer.is_active(winner_logical)) {
+			std::array<PlayerEliminationReason, MultiplayerState::MAX_PLAYERS> reasons{
+				PlayerEliminationReason::EFFECT,
+				PlayerEliminationReason::EFFECT,
+				PlayerEliminationReason::EFFECT,
+				PlayerEliminationReason::EFFECT
+			};
+			const auto eliminated = static_cast<uint8_t>(
+				field.multiplayer.active_mask() & ~(1u << winner_logical));
+			field.eliminate_multiplayer_players(eliminated, reasons);
+			playerid = field.multiplayer.field_side_of(winner_logical);
+		}
+	}
 	if (playerid == 0) {
 		if (pduel->game_field->is_player_affected_by_effect(1, EFFECT_CANNOT_LOSE_EFFECT))
 			return 0;
@@ -1481,7 +1509,10 @@ LUA_STATIC_FUNCTION(PayLPCost) {
 	if(playerid != 0 && playerid != 1)
 		return 0;
 	auto cost = lua_get<uint32_t>(L, 2);
-	pduel->game_field->emplace_process<Processors::PayLPCost>(playerid, cost);
+	const auto duelist = pduel->game_field->multiplayer.enabled()
+		? pduel->game_field->get_effect_duelist(playerid)
+		: pduel->game_field->player[playerid].current_duelist;
+	pduel->game_field->emplace_process<Processors::PayLPCost>(playerid, cost, duelist);
 	return yield();
 }
 LUA_STATIC_FUNCTION(DiscardDeck) {
@@ -1688,6 +1719,20 @@ LUA_STATIC_FUNCTION(ChangeAttackTarget) {
 		} else {
 			pduel->game_field->core.attack_player = TRUE;
 			message->write(loc_info{});
+		}
+		if(pduel->game_field->multiplayer.enabled()) {
+			auto& multiplayer = pduel->game_field->multiplayer;
+			const auto attacker_logical = multiplayer.logical_player(
+				attacker->current.controler, attacker->current.duelist);
+			const auto target_logical = target
+				? multiplayer.logical_player(target->current.controler, target->current.duelist)
+				: pduel->game_field->core.attack_target_logical;
+			pduel->game_field->core.attack_target_logical = target_logical;
+			pduel->game_field->core.attack_target_duelist = target
+				? target->current.duelist : multiplayer.duelist_index_of(target_logical);
+			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE)
+				message->write<uint8_t>(attacker_logical);
+			message->write<uint8_t>(target_logical);
 		}
 		lua_pushboolean(L, 1);
 	} else

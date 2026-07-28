@@ -629,9 +629,10 @@ struct TrapMonsterAdjust : public Process<false> {
 };
 struct PayLPCost : public Process<false> {
 	uint8_t playerid;
+	uint8_t duelist;
 	uint32_t cost;
-	PayLPCost(uint16_t step_, uint8_t playerid_, uint32_t cost_) :
-		Process(step_), playerid(playerid_), cost(cost_) {}
+	PayLPCost(uint16_t step_, uint8_t playerid_, uint32_t cost_, uint8_t duelist_) :
+		Process(step_), playerid(playerid_), duelist(duelist_), cost(cost_) {}
 };
 struct RemoveCounter : public Process<false> {
 	uint8_t rplayer;

@@ -133,7 +133,18 @@ int32_t effect::check_count_limit(uint8_t playerid) const {
 				if(pduel->game_field->get_effect_code(get_handler()->fieldid, count_flag, count_hopt_index, PLAYER_NONE) >= count)
 					return FALSE;
 			} else {
-				if(pduel->game_field->get_effect_code(count_code, count_flag, count_hopt_index, playerid) >= count)
+				auto count_player = playerid;
+				if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+						&& playerid < 2) {
+					const auto* effect_handler = get_handler();
+					const auto duelist = effect_handler
+							&& effect_handler->current.controler == playerid
+						? effect_handler->current.duelist
+						: pduel->game_field->player[playerid].current_duelist;
+					count_player = pduel->game_field->multiplayer.logical_player(playerid, duelist);
+				}
+				if(pduel->game_field->get_effect_code(
+						count_code, count_flag, count_hopt_index, count_player) >= count)
 					return FALSE;
 			}
 		}
@@ -449,7 +460,13 @@ int32_t effect::is_target(card* pcard) {
 					return FALSE;
 			}
 		} else {
-			if(pcard->current.controler == get_handler_player()) {
+			const auto* handler = get_handler();
+			const bool same_player = pduel->game_field->multiplayer.mode()
+					== MultiplayerMode::BATTLE_ROYALE && handler
+				? pcard->current.controler == handler->current.controler
+					&& pcard->current.duelist == handler->current.duelist
+				: pcard->current.controler == get_handler_player();
+			if(same_player) {
 				if(!pcard->current.is_location(s_range))
 					return FALSE;
 			} else {
@@ -480,9 +497,16 @@ int32_t effect::is_target_player(uint8_t playerid) {
 		if(o_range && playerid == 1)
 			return TRUE;
 	} else {
-		if(s_range && self == playerid)
+		const auto* handler = get_handler();
+		const bool same_player = pduel->game_field->multiplayer.mode()
+				== MultiplayerMode::BATTLE_ROYALE && handler && playerid < 2
+			? handler->current.controler == playerid
+				&& handler->current.duelist
+					== pduel->game_field->player[playerid].current_duelist
+			: self == playerid;
+		if(s_range && same_player)
 			return TRUE;
-		if(o_range && self != playerid)
+		if(o_range && !same_player)
 			return TRUE;
 	}
 	return FALSE;
@@ -586,8 +610,21 @@ void effect::dec_count(uint32_t playerid) {
 	if(count_code || count_flag) {
 		if(count_flag & EFFECT_COUNT_CODE_SINGLE)
 			pduel->game_field->add_effect_code(get_handler()->fieldid, count_flag, count_hopt_index, PLAYER_NONE);
-		else
-			pduel->game_field->add_effect_code(count_code, count_flag, count_hopt_index, playerid);
+		else {
+			auto count_player = static_cast<uint8_t>(playerid);
+			if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+					&& playerid < 2) {
+				const auto* effect_handler = get_handler();
+				const auto duelist = effect_handler
+						&& effect_handler->current.controler == playerid
+					? effect_handler->current.duelist
+					: pduel->game_field->player[playerid].current_duelist;
+				count_player = pduel->game_field->multiplayer.logical_player(
+					static_cast<uint8_t>(playerid), duelist);
+			}
+			pduel->game_field->add_effect_code(
+				count_code, count_flag, count_hopt_index, count_player);
+		}
 	}
 }
 void effect::inc_count(uint32_t playerid) {
@@ -600,8 +637,21 @@ void effect::inc_count(uint32_t playerid) {
 	if(count_code || count_flag) {
 		if(count_flag & EFFECT_COUNT_CODE_SINGLE)
 			pduel->game_field->dec_effect_code(get_handler()->fieldid, count_flag, count_hopt_index, PLAYER_NONE);
-		else
-			pduel->game_field->dec_effect_code(count_code, count_flag, count_hopt_index, playerid);
+		else {
+			auto count_player = static_cast<uint8_t>(playerid);
+			if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+					&& playerid < 2) {
+				const auto* effect_handler = get_handler();
+				const auto duelist = effect_handler
+						&& effect_handler->current.controler == playerid
+					? effect_handler->current.duelist
+					: pduel->game_field->player[playerid].current_duelist;
+				count_player = pduel->game_field->multiplayer.logical_player(
+					static_cast<uint8_t>(playerid), duelist);
+			}
+			pduel->game_field->dec_effect_code(
+				count_code, count_flag, count_hopt_index, count_player);
+		}
 	}
 }
 void effect::recharge() {

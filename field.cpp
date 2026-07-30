@@ -230,6 +230,24 @@ void field::publish_all_multiplayer_private_piles() {
 		publish_multiplayer_private_piles(logical_player);
 }
 
+void field::publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent) {
+	if(multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE
+			|| primary >= MultiplayerState::MAX_PLAYERS
+			|| opponent >= MultiplayerState::MAX_PLAYERS
+			|| primary == opponent
+			|| !multiplayer.is_active(primary)
+			|| !multiplayer.is_active(opponent))
+		return;
+	auto message = pduel->new_message(MSG_MULTIPLAYER_REPLAY_VIEW);
+	message->write<uint8_t>(primary);
+	message->write<uint8_t>(opponent);
+	// Live clients ignore this replay camera hint. The two following snapshots
+	// are privately routed during the duel, while their original payloads are
+	// retained in the replay so both displayed resource areas are exact.
+	publish_multiplayer_private_piles(primary);
+	publish_multiplayer_private_piles(opponent);
+}
+
 uint8_t field::get_effect_duelist(uint8_t playerid) const {
 	if(!multiplayer.enabled() || playerid > 1 || !core.reason_effect)
 		return player[playerid].current_duelist;

@@ -4,8 +4,10 @@
 #include "field.h"
 #include "ocgapi.h"
 
+#include <cstring>
 #include <cstdlib>
 #include <iostream>
+#include <vector>
 
 namespace {
 void expect(bool condition, const char* message) {
@@ -42,6 +44,27 @@ void initialize_extra_duelist(duel& game, uint8_t duelist_index, uint32_t code) 
 		POS_FACEDOWN_DEFENSE
 	};
 	OCG_DuelNewCard(&game, &info);
+}
+
+std::vector<std::vector<uint8_t>> take_messages(duel& game) {
+	game.clear_buffer();
+	game.generate_buffer();
+	std::vector<std::vector<uint8_t>> messages;
+	size_t offset = 0;
+	while(offset < game.buff.size()) {
+		expect(offset + sizeof(uint32_t) <= game.buff.size(),
+			"the generated message stream must contain a complete size prefix");
+		uint32_t size = 0;
+		std::memcpy(&size, game.buff.data() + offset, sizeof(size));
+		offset += sizeof(size);
+		expect(size > 0 && offset + size <= game.buff.size(),
+			"the generated message stream must contain a complete payload");
+		messages.emplace_back(game.buff.begin() + offset,
+			game.buff.begin() + offset + size);
+		offset += size;
+	}
+	game.clear_buffer();
+	return messages;
 }
 }
 
@@ -251,6 +274,25 @@ int main() {
 			&& royale_field.player[1].list_mzone[0] == marik
 			&& royale_field.player[1].list_mzone[7] == joey,
 		"switching turns must not merge a Battle Royale player's field with another player");
+	take_messages(royale);
+	royale_field.publish_multiplayer_replay_view(0, 2);
+	const auto replay_view_messages = take_messages(royale);
+	expect(replay_view_messages.size() == 3
+			&& replay_view_messages[0].size() == 3
+			&& replay_view_messages[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& replay_view_messages[0][1] == 0
+			&& replay_view_messages[0][2] == 2,
+		"a Battle Royale replay view must identify its primary player and displayed opponent");
+	expect(replay_view_messages[1].size() > 1
+			&& replay_view_messages[1][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& replay_view_messages[1][1] == 0
+			&& replay_view_messages[2].size() > 1
+			&& replay_view_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& replay_view_messages[2][1] == 2,
+		"a Battle Royale replay view must be followed by complete private-pile snapshots for both displayed players");
+	royale_field.publish_multiplayer_replay_view(0, 0);
+	expect(take_messages(royale).empty(),
+		"a Battle Royale replay view must reject an invalid self-opponent pairing");
 	auto* yugi_effect = royale.new_effect();
 	yugi_effect->owner = yugi;
 	yugi_effect->handler = yugi;
@@ -303,6 +345,22 @@ int main() {
 			&& royale_field.core.attack_target_logical == 1
 			&& royale_field.core.attack_target_duelist == 1,
 		"Let me take it must redirect the attack to the accepting Battle Royale player");
+	take_messages(royale);
+	royale_attack.step = 4;
+	expect(!royale_field.process(royale_attack),
+		"the redirected Battle Royale attack must resume against its interceptor");
+	const auto attack_intercept_view_messages = take_messages(royale);
+	expect(attack_intercept_view_messages.size() >= 3
+			&& attack_intercept_view_messages[0].size() == 3
+			&& attack_intercept_view_messages[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& attack_intercept_view_messages[0][1] == 0
+			&& attack_intercept_view_messages[0][2] == 1,
+		"accepting Let me take it for an attack must switch the replay view to the interceptor");
+	expect(attack_intercept_view_messages[1][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& attack_intercept_view_messages[1][1] == 0
+			&& attack_intercept_view_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& attack_intercept_view_messages[2][1] == 1,
+		"the redirected attack replay view must include both complete private-pile snapshots");
 	royale_field.core.subunits.clear();
 	Processors::Damage royale_effect_damage(
 		0, nullptr, REASON_EFFECT, 0, kaiba, 1, 600, false, 0, true);
@@ -313,11 +371,24 @@ int main() {
 	expect(royale_intercept_prompt && royale_intercept_prompt->playerid == 3,
 		"Battle Royale must offer interception to the first eligible logical player");
 	royale_field.returns.set<int32_t>(0, 1);
+	take_messages(royale);
 	royale_effect_damage.step = 20;
 	expect(!royale_field.process(royale_effect_damage)
 			&& royale_effect_damage.playerid == 0
 			&& royale_effect_damage.duelist == 1,
 		"Battle Royale interception must redirect damage to the accepting player's own LP");
+	const auto intercept_view_messages = take_messages(royale);
+	expect(intercept_view_messages.size() == 3
+			&& intercept_view_messages[0].size() == 3
+			&& intercept_view_messages[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& intercept_view_messages[0][1] == 0
+			&& intercept_view_messages[0][2] == 1,
+		"accepting Let me take it must switch the replay view to the interceptor");
+	expect(intercept_view_messages[1][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& intercept_view_messages[1][1] == 0
+			&& intercept_view_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& intercept_view_messages[2][1] == 1,
+		"the accepted interceptor replay view must include both complete private-pile snapshots");
 	const auto yugi_lp = royale_field.get_logical_lp(0, 1);
 	royale_effect_damage.step = 0;
 	expect(!royale_field.process(royale_effect_damage),

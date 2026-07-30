@@ -1703,6 +1703,18 @@ LUA_STATIC_FUNCTION(ChangeAttackTarget) {
 			if(pcard)
 				pduel->game_field->core.opp_mzone.insert(pcard->fieldid_r);
 		}
+		if(pduel->game_field->multiplayer.mode()
+				== MultiplayerMode::BATTLE_ROYALE) {
+			auto& multiplayer = pduel->game_field->multiplayer;
+			const auto attacker_logical = multiplayer.logical_player(
+				attacker->current.controler, attacker->current.duelist);
+			const auto target_logical = target
+				? multiplayer.logical_player(
+					target->current.controler, target->current.duelist)
+				: pduel->game_field->core.attack_target_logical;
+			pduel->game_field->publish_multiplayer_replay_view(
+				attacker_logical, target_logical);
+		}
 		auto message = pduel->new_message(MSG_ATTACK);
 		message->write(attacker->get_info_location());
 		if(target) {

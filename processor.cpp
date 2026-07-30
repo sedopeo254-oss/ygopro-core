@@ -2107,6 +2107,15 @@ bool field::process(Processors::BattleCommand& arg) {
 			core.attack_target_duelist = arg.attack_target_duelists[selected];
 		}
 		arg.attack_target_duelists.clear();
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+				&& core.attacker
+				&& multiplayer.is_active(core.attack_target_logical)) {
+			const auto attacker_logical = multiplayer.logical_player(
+				core.attacker->current.controler,
+				core.attacker->current.duelist);
+			publish_multiplayer_replay_view(
+				attacker_logical, core.attack_target_logical);
+		}
 		const bool three_vs_one_interception = multiplayer.mode() == MultiplayerMode::THREE_V_ONE
 			&& infos.turn_player == 1;
 		const bool battle_royale_interception = multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE

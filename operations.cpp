@@ -747,6 +747,8 @@ bool field::process(Processors::Damage& arg) {
 		if(returns.at<int32_t>(0)) {
 			const auto logical_player = arg.interceptors[arg.interceptor_index];
 			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+				publish_multiplayer_replay_view(
+					multiplayer.current_player(), logical_player);
 				playerid = multiplayer.field_side_of(logical_player);
 				arg.playerid = playerid;
 			}

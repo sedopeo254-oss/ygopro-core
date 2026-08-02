@@ -476,6 +476,31 @@ int main() {
 		"Battle Royale matching groups must expose every legal opposing field");
 	royale_field.core.reason_effect = nullptr;
 
+	bool animation_lua = true;
+	duel animation_game(options, animation_lua);
+	expect(animation_lua, "the summon-animation test duel must initialize");
+	auto& animation_field = *animation_game.game_field;
+	auto* summoned = animation_game.new_card(4300);
+	summoned->owner = 0;
+	animation_field.add_card(0, summoned, LOCATION_MZONE, 0);
+	summoned->current.position = POS_FACEUP_ATTACK;
+	summoned->summon.type = SUMMON_TYPE_SYNCHRO | 0x12;
+	Processors::SpSummonStep summon_step(2, nullptr, summoned, 0);
+	expect(!animation_field.process(summon_step),
+		"the special-summon announcement step must complete");
+	const auto summon_messages = take_messages(animation_game);
+	expect(summon_messages.size() == 2
+			&& summon_messages[0].size() == 9
+			&& summon_messages[0][0] == MSG_SUMMON_ANIMATION
+			&& summon_messages[1][0] == MSG_SPSUMMONING,
+		"a face-up special summon must announce its animation before the normal summon packet");
+	uint32_t animation_code = 0;
+	uint32_t animation_type = 0;
+	std::memcpy(&animation_code, summon_messages[0].data() + 1, sizeof(animation_code));
+	std::memcpy(&animation_type, summon_messages[0].data() + 5, sizeof(animation_type));
+	expect(animation_code == 4300 && animation_type == (SUMMON_TYPE_SYNCHRO | 0x12),
+		"the summon-animation packet must preserve the card code and exact summon type");
+
 	std::cout << "All multiplayer field tests passed.\n";
 	return 0;
 }

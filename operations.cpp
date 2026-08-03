@@ -3287,11 +3287,6 @@ bool field::process(Processors::SpSummonRule& arg) {
 		set_control(target, target->current.controler, 0, 0);
 		core.phase_action = true;
 		target->current.reason_effect = arg.summon_proc_effect;
-		if((target->current.position & POS_FACEDOWN) == 0) {
-			auto animation = pduel->new_message(MSG_SUMMON_ANIMATION);
-			animation->write<uint32_t>(target->data.code);
-			animation->write<uint32_t>(target->summon.type);
-		}
 		auto message = pduel->new_message(MSG_SPSUMMONING);
 		if((target->current.position & POS_FACEDOWN) == 0) {
 			message->write<uint32_t>(target->data.code);
@@ -3509,11 +3504,6 @@ bool field::process(Processors::SpSummonRule& arg) {
 	case 24: {
 		auto pgroup = arg.cards_to_summon_g;
 		card* pcard = *pgroup->it++;
-		if((pcard->current.position & POS_FACEDOWN) == 0) {
-			auto animation = pduel->new_message(MSG_SUMMON_ANIMATION);
-			animation->write<uint32_t>(pcard->data.code);
-			animation->write<uint32_t>(pcard->summon.type);
-		}
 		auto message = pduel->new_message(MSG_SPSUMMONING);
 		if((pcard->current.position & POS_FACEDOWN) == 0) {
 			message->write<uint32_t>(pcard->data.code);
@@ -3779,11 +3769,6 @@ bool field::process(Processors::SpSummonStep& arg) {
 		return FALSE;
 	}
 	case 2: {
-		if((target->current.position & POS_FACEDOWN) == 0) {
-			auto animation = pduel->new_message(MSG_SUMMON_ANIMATION);
-			animation->write<uint32_t>(target->data.code);
-			animation->write<uint32_t>(target->summon.type);
-		}
 		auto message = pduel->new_message(MSG_SPSUMMONING);
 		if((target->current.position & POS_FACEDOWN) == 0) {
 			message->write<uint32_t>(target->data.code);

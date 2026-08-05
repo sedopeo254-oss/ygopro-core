@@ -4,6 +4,7 @@
 #include "field.h"
 #include "ocgapi.h"
 
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
@@ -475,6 +476,204 @@ int main() {
 	expect(opposing_matching_group->container.size() == 3,
 		"Battle Royale matching groups must expose every legal opposing field");
 	royale_field.core.reason_effect = nullptr;
+
+	OCG_DuelOptions universal_options = options;
+	universal_options.flags = DUEL_UNIVERSAL_MULTIPLAYER;
+	universal_options.multiplayer.side1_players = 13;
+	universal_options.multiplayer.side2_players = 13;
+	universal_options.multiplayer.format = OCG_MULTIPLAYER_FORMAT_SOLO;
+	duel universal(universal_options, valid_lua);
+	expect(valid_lua, "the 26-player universal Duel must initialize");
+	auto& universal_field = *universal.game_field;
+	expect(universal_field.multiplayer.mode() == MultiplayerMode::UNIVERSAL
+			&& universal_field.multiplayer.player_count() == 26,
+		"the universal options must reach the core field");
+	const auto first_player_lp = universal_field.get_logical_lp(0, 0);
+	universal_field.get_logical_lp(0, 1) = first_player_lp - 500;
+	expect(universal_field.get_logical_lp(0, 0) == first_player_lp
+			&& universal_field.get_logical_lp(0, 1) == first_player_lp - 500,
+		"an empty logical Deck must still receive independent life points");
+	universal_field.get_logical_lp(0, 1) = first_player_lp;
+	expect(&universal_field.get_logical_list(0, LOCATION_HAND, 0)
+			!= &universal_field.get_logical_list(0, LOCATION_HAND, 1),
+		"an empty logical Deck must still own an independent private resource set");
+	expect(universal_field.player[0].list_mzone.size() == 91
+			&& universal_field.player[1].list_mzone.size() == 91
+			&& universal_field.player[0].list_szone.size() == 104
+			&& universal_field.player[1].list_szone.size() == 104,
+		"13 independent monster and spell/trap fields must exist on each core side");
+	auto initialize_universal_duelist = [&](uint8_t side, uint8_t duelist, uint32_t code) {
+		const OCG_NewCardInfo info{
+			side,
+			duelist,
+			code,
+			side,
+			LOCATION_DECK,
+			0,
+			POS_FACEDOWN_DEFENSE
+		};
+		OCG_DuelNewCard(&universal, &info);
+	};
+	initialize_universal_duelist(0, 12, 5000);
+	initialize_universal_duelist(1, 12, 5001);
+	expect(universal_field.tag_swap_to(0, 12) && universal_field.tag_swap_to(1, 12),
+		"the thirteenth private resource set on both sides must be selectable");
+	auto* side_one_final = universal.new_card(5002);
+	side_one_final->owner = 0;
+	side_one_final->owner_duelist = 12;
+	universal_field.add_card(0, side_one_final, LOCATION_MZONE, 6, false, 12);
+	auto* side_two_final = universal.new_card(5003);
+	side_two_final->owner = 1;
+	side_two_final->owner_duelist = 12;
+	universal_field.add_card(1, side_two_final, LOCATION_SZONE, 7, false, 12);
+	expect(side_one_final->current.sequence == 90
+			&& side_two_final->current.sequence == 103,
+		"the final universal fields must keep globally unique internal zone sequences");
+	take_messages(universal);
+	universal_field.publish_all_multiplayer_private_piles();
+	const auto universal_private_messages = take_messages(universal);
+	expect(universal_private_messages.size() == 26,
+		"the core must publish one independent private-pile snapshot for every universal player");
+	for(uint8_t logical = 0; logical < 26; ++logical) {
+		expect(universal_private_messages[logical].size() >= 2
+				&& universal_private_messages[logical][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+				&& universal_private_messages[logical][1] == logical,
+			"private-pile snapshots must retain their unique logical-player route");
+	}
+
+	OCG_DuelOptions universal_team_options = options;
+	universal_team_options.flags = DUEL_UNIVERSAL_MULTIPLAYER;
+	universal_team_options.multiplayer.side1_players = 2;
+	universal_team_options.multiplayer.side2_players = 2;
+	universal_team_options.multiplayer.format = OCG_MULTIPLAYER_FORMAT_TEAMS;
+	// Logical players 0 and 2 are allies even though they use opposite core
+	// sides. Players 1 and 3 form the other team.
+	universal_team_options.multiplayer.teams[0] = 0;
+	universal_team_options.multiplayer.teams[1] = 1;
+	universal_team_options.multiplayer.teams[2] = 0;
+	universal_team_options.multiplayer.teams[3] = 1;
+	bool universal_team_valid_lua = true;
+	duel universal_team(universal_team_options, universal_team_valid_lua);
+	expect(universal_team_valid_lua, "the Universal Teams Lua runtime must initialize");
+	auto& universal_team_field = *universal_team.game_field;
+	initialize_extra_duelist(universal_team, 1, 6001);
+	const OCG_NewCardInfo universal_team_side_two_extra{
+		1,
+		1,
+		6003,
+		1,
+		LOCATION_DECK,
+		0,
+		POS_FACEDOWN_DEFENSE
+	};
+	OCG_DuelNewCard(&universal_team, &universal_team_side_two_extra);
+	auto add_universal_team_monster = [&](uint8_t side, uint8_t duelist, uint32_t code) {
+		auto* monster = universal_team.new_card(code);
+		monster->owner = side;
+		monster->owner_duelist = duelist;
+		monster->current.position = POS_FACEUP_ATTACK;
+		universal_team_field.add_card(side, monster, LOCATION_MZONE, 0, false, duelist);
+		return monster;
+	};
+	auto* team_zero_player_zero = add_universal_team_monster(0, 0, 6100);
+	auto* team_one_player_one = add_universal_team_monster(0, 1, 6101);
+	auto* team_zero_player_two = add_universal_team_monster(1, 0, 6102);
+	auto* team_one_player_three = add_universal_team_monster(1, 1, 6103);
+	expect(team_zero_player_zero->current.sequence == 0
+			&& team_one_player_one->current.sequence == 7
+			&& team_zero_player_two->current.sequence == 0
+			&& team_one_player_three->current.sequence == 7,
+		"Universal Teams must preserve every teammate's independent field");
+	auto* team_zero_opponent_aura = universal_team.new_effect();
+	team_zero_opponent_aura->owner = team_zero_player_zero;
+	team_zero_opponent_aura->handler = team_zero_player_zero;
+	team_zero_opponent_aura->type = EFFECT_TYPE_FIELD;
+	team_zero_opponent_aura->o_range = LOCATION_MZONE;
+	card_set universal_team_opponents;
+	universal_team_field.filter_affected_cards(team_zero_opponent_aura,
+		&universal_team_opponents);
+	expect(universal_team_opponents.size() == 2
+			&& universal_team_opponents.count(team_one_player_one) == 1
+			&& universal_team_opponents.count(team_one_player_three) == 1
+			&& universal_team_opponents.count(team_zero_player_two) == 0,
+		"opponent-range effects in Universal Teams must exclude allies on either core side");
+	universal_team_field.core.attacker = team_zero_player_zero;
+	universal_team_field.core.attack_target_logical = 2;
+	card_vector universal_team_targets;
+	universal_team_field.get_attack_target(team_zero_player_zero, &universal_team_targets);
+	expect(universal_team_targets.empty(),
+		"a Universal Teams player must not be allowed to attack a cross-side ally");
+	universal_team_field.core.attack_target_logical = 3;
+	universal_team_targets.clear();
+	universal_team_field.get_attack_target(team_zero_player_zero, &universal_team_targets);
+	expect(universal_team_targets.size() == 1
+			&& universal_team_targets.front() == team_one_player_three,
+		"a Universal Teams attack must project the selected enemy's independent field");
+	auto* team_zero_lp_protection = universal_team.new_effect();
+	team_zero_player_zero->set_status(STATUS_EFFECT_ENABLED, TRUE);
+	team_zero_lp_protection->owner = team_zero_player_zero;
+	team_zero_lp_protection->type = EFFECT_TYPE_FIELD;
+	team_zero_lp_protection->code = EFFECT_CANNOT_LOSE_LP;
+	team_zero_lp_protection->flag[0] = EFFECT_FLAG_PLAYER_TARGET;
+	team_zero_lp_protection->range = LOCATION_MZONE;
+	team_zero_lp_protection->s_range = 1;
+	team_zero_player_zero->add_effect(team_zero_lp_protection);
+	expect(universal_team_field.is_logical_player_affected_by_effect(0, 0,
+			EFFECT_CANNOT_LOSE_LP) == team_zero_lp_protection,
+		"player protection must apply to the exact logical player that owns it");
+	expect(!universal_team_field.is_logical_player_affected_by_effect(0, 1,
+			EFFECT_CANNOT_LOSE_LP),
+		"player protection must not leak to another player on the same core side");
+	expect(!universal_team_field.is_logical_player_affected_by_effect(1, 0,
+			EFFECT_CANNOT_LOSE_LP),
+		"player protection must not leak to a cross-side teammate");
+	auto* team_zero_cannot_draw = universal_team.new_effect();
+	team_zero_cannot_draw->owner = team_zero_player_zero;
+	team_zero_cannot_draw->type = EFFECT_TYPE_FIELD;
+	team_zero_cannot_draw->code = EFFECT_CANNOT_DRAW;
+	team_zero_cannot_draw->flag[0] = EFFECT_FLAG_PLAYER_TARGET;
+	team_zero_cannot_draw->range = LOCATION_MZONE;
+	team_zero_cannot_draw->s_range = 1;
+	team_zero_player_zero->add_effect(team_zero_cannot_draw);
+	expect(!universal_team_field.is_player_can_draw(0, 0),
+		"a logical player's cannot-draw effect must apply to that player");
+	expect(universal_team_field.is_player_can_draw(0, 1),
+		"a logical player's cannot-draw effect must not block a same-side player");
+	expect(universal_team_field.is_player_can_draw(1, 0),
+		"a logical player's cannot-draw effect must not block a cross-side teammate");
+	universal_team_field.core.subunits.clear();
+	Processors::Damage team_effect_damage(0, nullptr, REASON_EFFECT, 0,
+		team_zero_player_zero, 0, 500, false, 1, true);
+	expect(!universal_team_field.process(team_effect_damage),
+		"Universal Teams effect damage must pause for a teammate interception");
+	auto* team_intercept_prompt =
+		Processors::get_opt_variant<Processors::SelectYesNo>(
+			universal_team_field.core.subunits.back());
+	expect(team_intercept_prompt && team_intercept_prompt->playerid == 5,
+		"only the victim's cross-side teammate must receive the interception prompt");
+	universal_team_field.core.subunits.clear();
+
+	take_messages(universal_team);
+	const auto first_team_elimination = OCG_DuelEliminatePlayer(&universal_team,
+		1, static_cast<uint8_t>(PlayerEliminationReason::SURRENDER));
+	expect((first_team_elimination & OCG_MULTIPLAYER_ELIMINATION_APPLIED)
+			&& !(first_team_elimination & OCG_MULTIPLAYER_ELIMINATION_FINISHED),
+		"eliminating one Universal Teams member must leave their teammate active");
+	const auto final_team_elimination = OCG_DuelEliminatePlayer(&universal_team,
+		3, static_cast<uint8_t>(PlayerEliminationReason::SURRENDER));
+	expect(final_team_elimination & OCG_MULTIPLAYER_ELIMINATION_FINISHED,
+		"eliminating the final member of a team must finish Universal Teams");
+	const auto universal_team_win_messages = take_messages(universal_team);
+	const auto win_message = std::find_if(universal_team_win_messages.begin(),
+		universal_team_win_messages.end(), [](const auto& message) {
+			return !message.empty() && message[0] == MSG_WIN;
+		});
+	expect(win_message != universal_team_win_messages.end()
+			&& win_message->size() == 5
+			&& (*win_message)[1] == PLAYER_NONE
+			&& (*win_message)[3] == MultiplayerState::NO_PLAYER
+			&& (*win_message)[4] == 0,
+		"Universal Teams must encode the winning team without inventing an invalid physical-side winner");
 
 	std::cout << "All multiplayer field tests passed.\n";
 	return 0;

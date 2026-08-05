@@ -464,7 +464,7 @@ bool field::process(Processors::SelectChain& arg) {
 	auto forced = arg.forced;
 	const bool split_logical_prompt = !forced
 		&& ((multiplayer.mode() == MultiplayerMode::THREE_V_ONE && playerid == 0)
-			|| multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE);
+			|| multiplayer.uses_independent_fields());
 	auto write_chain = [&](auto* out_message, size_t chain_index) {
 		const auto& ch = *std::next(core.select_chains.begin(), static_cast<ptrdiff_t>(chain_index));
 		effect* peffect = ch.triggering_effect;

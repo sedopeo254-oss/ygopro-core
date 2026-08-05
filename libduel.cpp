@@ -23,32 +23,48 @@ namespace LUA_NAMESPACE {
 
 using namespace scriptlib;
 
-std::pair<uint8_t, uint8_t> GetEffectPlayerMasks(field* game_field, uint8_t playerid,
-		bool include_self, bool include_opponents) {
-	if(game_field->multiplayer.mode() != MultiplayerMode::THREE_V_ONE || playerid > 1)
+std::pair<MultiplayerState::player_mask_t, MultiplayerState::player_mask_t>
+GetEffectPlayerMasks(field* game_field, uint8_t playerid, bool include_self,
+		bool include_opponents) {
+	if(!game_field->multiplayer.enabled() || playerid > 1)
 		return { 0, 0 };
 	const auto origin_duelist = game_field->get_effect_duelist(playerid);
 	const auto origin = game_field->multiplayer.logical_player(playerid, origin_duelist);
 	if(origin >= MultiplayerState::MAX_PLAYERS)
 		return { 0, 0 };
 	const auto origin_team = game_field->multiplayer.team_of(origin);
-	uint8_t normal_mask = 0;
-	uint8_t expanded_mask = 0;
+	MultiplayerState::player_mask_t normal_mask = 0;
+	MultiplayerState::player_mask_t expanded_mask = 0;
 	if(include_self && game_field->multiplayer.is_active(origin))
-		normal_mask |= static_cast<uint8_t>(1u << origin);
+		normal_mask |= static_cast<MultiplayerState::player_mask_t>(1u) << origin;
 	for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
 		if(!game_field->multiplayer.is_active(logical))
 			continue;
 		const bool same_team = game_field->multiplayer.team_of(logical) == origin_team;
-		if((include_self && same_team) || (include_opponents && !same_team))
-			expanded_mask |= static_cast<uint8_t>(1u << logical);
+		if((include_self && same_team)
+				|| (include_opponents
+					&& game_field->multiplayer.are_opponents(origin, logical)))
+			expanded_mask |= static_cast<MultiplayerState::player_mask_t>(1u) << logical;
 	}
 	if(include_opponents) {
 		const auto opposing_side = static_cast<uint8_t>(1 - playerid);
-		const auto opposing = game_field->multiplayer.logical_player(
+		auto opposing = game_field->multiplayer.logical_player(
 			opposing_side, game_field->player[opposing_side].current_duelist);
-		if(opposing < MultiplayerState::MAX_PLAYERS && game_field->multiplayer.is_active(opposing))
-			normal_mask |= static_cast<uint8_t>(1u << opposing);
+		if(opposing >= MultiplayerState::MAX_PLAYERS
+				|| !game_field->multiplayer.is_active(opposing)
+				|| !game_field->multiplayer.are_opponents(origin, opposing)) {
+			opposing = MultiplayerState::NO_PLAYER;
+			for(uint8_t logical = 0;
+					logical < game_field->multiplayer.player_count(); ++logical) {
+				if(game_field->multiplayer.is_active(logical)
+						&& game_field->multiplayer.are_opponents(origin, logical)) {
+					opposing = logical;
+					break;
+				}
+			}
+		}
+		if(opposing < MultiplayerState::MAX_PLAYERS)
+			normal_mask |= static_cast<MultiplayerState::player_mask_t>(1u) << opposing;
 	}
 	return { normal_mask, expanded_mask };
 }
@@ -1248,34 +1264,46 @@ LUA_STATIC_FUNCTION(Win) {
 	auto reason = lua_get<uint32_t>(L, 2);
 	if (playerid != 0 && playerid != 1 && playerid != 2)
 		return 0;
-	if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+	bool handled_multiplayer_win = false;
+	if(pduel->game_field->multiplayer.uses_independent_fields()
 			&& playerid < 2) {
 		auto& field = *pduel->game_field;
 		const auto winner_duelist = field.get_effect_duelist(playerid);
 		const auto winner_logical = field.multiplayer.logical_player(
 			playerid, winner_duelist);
-		if(field.multiplayer.is_active(winner_logical)) {
-			std::array<PlayerEliminationReason, MultiplayerState::MAX_PLAYERS> reasons{
-				PlayerEliminationReason::EFFECT,
-				PlayerEliminationReason::EFFECT,
-				PlayerEliminationReason::EFFECT,
-				PlayerEliminationReason::EFFECT
-			};
-			const auto eliminated = static_cast<uint8_t>(
-				field.multiplayer.active_mask() & ~(1u << winner_logical));
-			field.eliminate_multiplayer_players(eliminated, reasons);
-			playerid = field.multiplayer.field_side_of(winner_logical);
+		if(!field.multiplayer.is_active(winner_logical))
+			return 0;
+		std::array<PlayerEliminationReason, MultiplayerState::MAX_PLAYERS> reasons;
+		reasons.fill(PlayerEliminationReason::EFFECT);
+		MultiplayerState::player_mask_t eliminated = 0;
+		for(uint8_t logical = 0; logical < field.multiplayer.player_count(); ++logical) {
+			if(!field.multiplayer.is_active(logical)
+					|| !field.multiplayer.are_opponents(winner_logical, logical))
+				continue;
+			const auto side = field.multiplayer.field_side_of(logical);
+			const auto duelist = field.multiplayer.duelist_index_of(logical);
+			if(!field.is_logical_player_affected_by_effect(side, duelist,
+					EFFECT_CANNOT_LOSE_EFFECT))
+				eliminated |= static_cast<MultiplayerState::player_mask_t>(1u) << logical;
 		}
+		field.eliminate_multiplayer_players(eliminated, reasons);
+		if(!field.multiplayer.is_finished())
+			return 0;
+		playerid = field.multiplayer.mode() == MultiplayerMode::UNIVERSAL
+				&& field.multiplayer.universal_format()
+					== UniversalMultiplayerFormat::TEAMS
+			? PLAYER_NONE : field.multiplayer.field_side_of(winner_logical);
+		handled_multiplayer_win = true;
 	}
-	if (playerid == 0) {
+	if (!handled_multiplayer_win && playerid == 0) {
 		if (pduel->game_field->is_player_affected_by_effect(1, EFFECT_CANNOT_LOSE_EFFECT))
 			return 0;
 	}
-	else if (playerid == 1) {
+	else if (!handled_multiplayer_win && playerid == 1) {
 		if (pduel->game_field->is_player_affected_by_effect(0, EFFECT_CANNOT_LOSE_EFFECT))
 			return 0;
 	}
-	else {
+	else if(!handled_multiplayer_win) {
 		if (pduel->game_field->is_player_affected_by_effect(0, EFFECT_CANNOT_LOSE_EFFECT) && pduel->game_field->is_player_affected_by_effect(1, EFFECT_CANNOT_LOSE_EFFECT))
 			return 0;
 		else if (pduel->game_field->is_player_affected_by_effect(0, EFFECT_CANNOT_LOSE_EFFECT))
@@ -1703,8 +1731,7 @@ LUA_STATIC_FUNCTION(ChangeAttackTarget) {
 			if(pcard)
 				pduel->game_field->core.opp_mzone.insert(pcard->fieldid_r);
 		}
-		if(pduel->game_field->multiplayer.mode()
-				== MultiplayerMode::BATTLE_ROYALE) {
+		if(pduel->game_field->multiplayer.uses_independent_fields()) {
 			auto& multiplayer = pduel->game_field->multiplayer;
 			const auto attacker_logical = multiplayer.logical_player(
 				attacker->current.controler, attacker->current.duelist);
@@ -1742,7 +1769,7 @@ LUA_STATIC_FUNCTION(ChangeAttackTarget) {
 			pduel->game_field->core.attack_target_logical = target_logical;
 			pduel->game_field->core.attack_target_duelist = target
 				? target->current.duelist : multiplayer.duelist_index_of(target_logical);
-			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE)
+			if(multiplayer.uses_independent_fields())
 				message->write<uint8_t>(attacker_logical);
 			message->write<uint8_t>(target_logical);
 		}
@@ -3495,7 +3522,8 @@ LUA_STATIC_FUNCTION(SelectEffectPlayers) {
 	}
 	const auto origin = pduel->game_field->multiplayer.logical_player(
 		playerid, pduel->game_field->get_effect_duelist(playerid));
-	const auto selecting_player = static_cast<uint8_t>(origin < 3 ? origin + 2 : playerid);
+	const auto selecting_player =
+		pduel->game_field->multiplayer.prompt_player_of(origin);
 	pduel->game_field->emplace_process<Processors::SelectYesNo>(selecting_player,
 		MULTIPLAYER_EXPAND_EFFECT_DESC);
 	return yieldk({
@@ -4032,7 +4060,7 @@ LUA_STATIC_FUNCTION(IsPlayerCanDrawPlayer) {
 	}
 	const auto side = pduel->game_field->multiplayer.field_side_of(logical_player);
 	const auto duelist = pduel->game_field->multiplayer.duelist_index_of(logical_player);
-	lua_pushboolean(L, pduel->game_field->is_player_can_draw(side)
+	lua_pushboolean(L, pduel->game_field->is_player_can_draw(side, duelist)
 		&& pduel->game_field->get_logical_list(side, LOCATION_DECK, duelist).size() >= count);
 	return 1;
 }
@@ -4495,14 +4523,23 @@ LUA_STATIC_FUNCTION(EliminatePlayer) {
 	if(pduel->game_field->multiplayer.is_finished()) {
 		uint8_t winner = PLAYER_NONE;
 		if(pduel->game_field->multiplayer.has_winner()) {
-			winner = pduel->game_field->multiplayer.mode() == MultiplayerMode::THREE_V_ONE
-				? pduel->game_field->multiplayer.winner_team()
-				: pduel->game_field->multiplayer.field_side_of(
+			if(pduel->game_field->multiplayer.mode() == MultiplayerMode::THREE_V_ONE)
+				winner = pduel->game_field->multiplayer.winner_team();
+			else if(pduel->game_field->multiplayer.mode() != MultiplayerMode::UNIVERSAL
+					|| pduel->game_field->multiplayer.universal_format()
+						!= UniversalMultiplayerFormat::TEAMS)
+				winner = pduel->game_field->multiplayer.field_side_of(
 					pduel->game_field->multiplayer.winner_player());
 		}
 		auto message = pduel->new_message(MSG_WIN);
 		message->write<uint8_t>(winner);
 		message->write<uint8_t>(win_reason);
+		if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE)
+			message->write<uint8_t>(pduel->game_field->multiplayer.winner_player());
+		else if(pduel->game_field->multiplayer.mode() == MultiplayerMode::UNIVERSAL) {
+			message->write<uint8_t>(pduel->game_field->multiplayer.winner_player());
+			message->write<uint8_t>(pduel->game_field->multiplayer.winner_team());
+		}
 		pduel->game_field->core.win_player = 5;
 		pduel->game_field->core.win_reason = 0;
 	} else if(was_current_player) {

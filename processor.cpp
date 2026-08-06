@@ -2273,6 +2273,18 @@ bool field::process(Processors::BattleCommand& arg) {
 	}
 	case 8: {
 		core.attack_cancelable = true;
+		// Re-emit the authoritative camera pair immediately before MSG_ATTACK.
+		// Target selection, interception, or replay seeking may have changed the
+		// projected fields since the earlier selection prompt. Keeping these
+		// messages adjacent makes the replay arrow deterministic.
+		if(multiplayer.uses_independent_fields()
+				&& core.attacker
+				&& multiplayer.is_active(core.attack_target_logical)) {
+			publish_multiplayer_replay_view(
+				multiplayer.logical_player(core.attacker->current.controler,
+					core.attacker->current.duelist),
+				core.attack_target_logical);
+		}
 		auto message = pduel->new_message(MSG_ATTACK);
 			message->write(core.attacker->get_info_location());
 			if(core.attack_target) {
@@ -3106,6 +3118,13 @@ bool field::process(Processors::DamageStep& arg) {
 		}
 		core.attacker->announced_cards.addcard(core.attack_target);
 		attack_all_target_check();
+		if(multiplayer.uses_independent_fields()
+				&& multiplayer.is_active(core.attack_target_logical)) {
+			publish_multiplayer_replay_view(
+				multiplayer.logical_player(core.attacker->current.controler,
+					core.attacker->current.duelist),
+				core.attack_target_logical);
+		}
 		auto message = pduel->new_message(MSG_ATTACK);
 		message->write(core.attacker->get_info_location());
 		if(core.attack_target) {

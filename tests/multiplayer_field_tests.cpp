@@ -362,6 +362,47 @@ int main() {
 			&& attack_intercept_view_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
 			&& attack_intercept_view_messages[2][1] == 1,
 		"the redirected attack replay view must include both complete private-pile snapshots");
+	// The final attack message must carry an adjacent authoritative view pair.
+	// This is what prevents a replay seek from briefly drawing the arrow from
+	// the target's stale field transform back toward the attacker.
+	royale_field.core.subunits.clear();
+	royale_field.core.attacker = kaiba;
+	royale_field.core.attack_target = marik;
+	royale_field.core.attack_target_logical = 2;
+	royale_field.core.attack_target_duelist = 0;
+	take_messages(royale);
+	Processors::BattleCommand deterministic_replay_attack(8);
+	expect(!royale_field.process(deterministic_replay_attack),
+		"a Battle Royale attack must emit its final replay camera and attack messages");
+	const auto deterministic_attack_messages = take_messages(royale);
+	auto attack_message = std::find_if(deterministic_attack_messages.begin(),
+		deterministic_attack_messages.end(), [](const auto& message) {
+			return !message.empty() && message[0] == MSG_ATTACK;
+		});
+	expect(attack_message != deterministic_attack_messages.end()
+			&& std::distance(deterministic_attack_messages.begin(), attack_message) >= 3,
+		"the final Battle Royale attack must be preceded by a replay-view snapshot pair");
+	if(attack_message != deterministic_attack_messages.end()
+			&& std::distance(deterministic_attack_messages.begin(), attack_message) >= 3) {
+		const auto attack_index = static_cast<size_t>(std::distance(
+			deterministic_attack_messages.begin(), attack_message));
+		expect(deterministic_attack_messages[attack_index - 3].size() == 3
+				&& deterministic_attack_messages[attack_index - 3][0]
+					== MSG_MULTIPLAYER_REPLAY_VIEW
+				&& deterministic_attack_messages[attack_index - 3][1] == 0
+				&& deterministic_attack_messages[attack_index - 3][2] == 2
+				&& deterministic_attack_messages[attack_index - 2][0]
+					== MSG_MULTIPLAYER_PRIVATE_PILES
+				&& deterministic_attack_messages[attack_index - 2][1] == 0
+				&& deterministic_attack_messages[attack_index - 1][0]
+					== MSG_MULTIPLAYER_PRIVATE_PILES
+				&& deterministic_attack_messages[attack_index - 1][1] == 2,
+			"P1 attacking P3 must serialize the P1 -> P3 camera immediately before MSG_ATTACK");
+		expect(attack_message->size() >= 23
+				&& (*attack_message)[attack_message->size() - 2] == 0
+				&& (*attack_message)[attack_message->size() - 1] == 2,
+			"P1 attacking P3 must append attacker 0 and target 2 in that order");
+	}
 	royale_field.core.subunits.clear();
 	Processors::Damage royale_effect_damage(
 		0, nullptr, REASON_EFFECT, 0, kaiba, 1, 600, false, 0, true);

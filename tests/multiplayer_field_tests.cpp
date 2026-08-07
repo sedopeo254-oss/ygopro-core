@@ -67,6 +67,14 @@ std::vector<std::vector<uint8_t>> take_messages(duel& game) {
 	game.clear_buffer();
 	return messages;
 }
+
+uint32_t read_u32(const std::vector<uint8_t>& message, size_t offset) {
+	expect(offset + sizeof(uint32_t) <= message.size(),
+		"the message must contain the requested uint32 value");
+	uint32_t value = 0;
+	std::memcpy(&value, message.data() + offset, sizeof(value));
+	return value;
+}
 }
 
 int main() {
@@ -122,6 +130,33 @@ int main() {
 	field.core.reason_effect = nullptr;
 	expect(field.get_response_player(0) == 4,
 		"the current allied field must remain the response fallback without an effect handler");
+
+	// Virtual World selects a Deck Master from a code-only list. These cards
+	// have no field location, so their synthetic location must still identify
+	// the exact logical duelist. Otherwise the server's private-card filter
+	// exposes player 1's choices but replaces players 2 and 3 with card backs.
+	const std::array<uint8_t, 4> deck_master_selectors{ 2, 3, 4, 1 };
+	const std::array<uint8_t, 4> deck_master_sides{ 0, 0, 0, 1 };
+	const std::array<uint8_t, 4> deck_master_duelists{ 0, 1, 2, 0 };
+	take_messages(game);
+	for(uint8_t logical = 0; logical < 4; ++logical) {
+		field.core.select_cards_codes = { { 9000u + logical, 1u } };
+		Processors::SelectCardCodes deck_master_select(
+			0, deck_master_selectors[logical], false, 1, 1,
+			deck_master_sides[logical], deck_master_duelists[logical]);
+		expect(!field.process(deck_master_select),
+			"a Deck Master code selection must wait for its logical player");
+		const auto deck_master_messages = take_messages(game);
+		expect(deck_master_messages.size() == 1,
+			"a Deck Master code selection must emit exactly one prompt");
+		const auto& prompt = deck_master_messages.front();
+		expect(prompt.size() == 29 && prompt[0] == MSG_SELECT_CARD
+				&& prompt[1] == deck_master_selectors[logical]
+				&& read_u32(prompt, 15) == 9000u + logical
+				&& prompt[19] == deck_master_sides[logical]
+				&& (read_u32(prompt, 25) >> 24) == deck_master_duelists[logical],
+			"every 3v1 player must receive face-up Deck Master choices tagged with their own logical seat");
+	}
 
 	auto* tristan_hand = game.new_card(2003);
 	tristan_hand->owner = 0;

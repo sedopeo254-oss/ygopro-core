@@ -339,6 +339,7 @@ bool field::process(Processors::SelectCardCodes& arg) {
 	auto playerid = arg.playerid;
 	const auto selecting_player = get_response_player(playerid);
 	auto display_playerid = arg.display_playerid;
+	auto display_duelist = arg.display_duelist;
 	auto cancelable = arg.cancelable;
 	auto min = arg.min;
 	auto max = arg.max;
@@ -372,7 +373,7 @@ bool field::process(Processors::SelectCardCodes& arg) {
 		message->write<uint32_t>((uint32_t)core.select_cards_codes.size());
 		for(const auto& obj : core.select_cards_codes) {
 			message->write<uint32_t>(obj.first);
-			message->write(loc_info{ display_playerid, 0, 0, 0, 0 });
+			message->write(loc_info{ display_playerid, 0, display_duelist, 0, 0 });
 		}
 		return FALSE;
 	} else {

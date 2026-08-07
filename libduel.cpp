@@ -2748,12 +2748,14 @@ LUA_STATIC_FUNCTION(SelectCardsFromCodesPlayer) {
 	const auto logical_player = lua_get<uint8_t>(L, 1);
 	uint8_t playerid = logical_player;
 	uint8_t display_playerid = logical_player;
+	uint8_t display_duelist = 0;
 	if(pduel->game_field->multiplayer.enabled()) {
 		if(logical_player >= MultiplayerState::MAX_PLAYERS
 				|| !pduel->game_field->multiplayer.is_active(logical_player))
 			return 0;
 		playerid = pduel->game_field->multiplayer.prompt_player_of(logical_player);
 		display_playerid = pduel->game_field->multiplayer.field_side_of(logical_player);
+		display_duelist = pduel->game_field->multiplayer.duelist_index_of(logical_player);
 	}
 	if(playerid == MultiplayerState::NO_PLAYER || display_playerid > 1)
 		return 0;
@@ -2765,7 +2767,7 @@ LUA_STATIC_FUNCTION(SelectCardsFromCodesPlayer) {
 		select_codes.emplace_back(lua_get<uint32_t>(L, -1), static_cast<uint32_t>(select_codes.size() + 1));
 	});
 	pduel->game_field->emplace_process<Processors::SelectCardCodes>(
-		playerid, cancelable, min, max, display_playerid);
+		playerid, cancelable, min, max, display_playerid, display_duelist);
 	return yieldk({
 		int ret = 1;
 		const auto& ret_codes = pduel->game_field->return_card_codes;

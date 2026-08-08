@@ -1,0 +1,60 @@
+name: Publish anime 3v1 core fixes
+
+on:
+  push:
+    branches:
+      - automation/publish-3v1-anime-fixes
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-anime-3v1-core
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decode reviewed patch
+        shell: bash
+        run: |
+          base64 --decode .github/publish/core.patch.gz.b64 | gzip -dc > /tmp/core.patch
+          test "$(sha256sum /tmp/core.patch | cut -d' ' -f1)" = "ca2cf9a2a394368e258b3866bf1f331010e5f1d64ac3d998e2370263ecfb0bd1"
+
+      - name: Apply, test, commit, and publish
+        shell: bash
+        env:
+          TARGET_BRANCH: agent/cad-multiplayer
+        run: |
+          set -euo pipefail
+          git fetch origin "$TARGET_BRANCH"
+          git checkout -B publish-target "origin/$TARGET_BRANCH"
+          git apply --check /tmp/core.patch
+          git apply /tmp/core.patch
+          git diff --check
+
+          sh tests/run_multiplayer_state_tests.sh
+          sh tests/run_multiplayer_field_tests.sh
+
+          git config user.name "sedopeo254-oss"
+          git config user.email "sedopeo254@gmail.com"
+          git add -- \
+            effect.cpp \
+            field.cpp \
+            field.h \
+            libcard.cpp \
+            libduel.cpp \
+            multiplayer.cpp \
+            multiplayer.h \
+            operations.cpp \
+            processor.cpp \
+            tests/multiplayer_field_tests.cpp \
+            tests/multiplayer_state_tests.cpp
+          git diff --cached --check
+          git commit -m "Fix anime 3v1 ownership, targeting, LP and replay"
+          git push origin HEAD:"$TARGET_BRANCH"

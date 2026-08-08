@@ -1,0 +1,55 @@
+name: Publish tested 3v1 stable restoration
+
+on:
+  push:
+    branches:
+      - automation/publish-3v1-stable-restoration
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-3v1-stable-restoration-core
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decode reviewed patch
+        shell: bash
+        run: |
+          base64 --decode .github/publish/core-stable-restoration.patch.gz.b64 | gzip -dc > /tmp/core-stable-restoration.patch
+          test "$(sha256sum /tmp/core-stable-restoration.patch | cut -d' ' -f1)" = "4b9b081c62471bcd75d8019a74cc9cf0029eb797f8736949caafbb1fc2108a62"
+
+      - name: Restore, test, commit, and publish
+        shell: bash
+        env:
+          TARGET_BRANCH: agent/cad-multiplayer
+          STABLE_BASE: ce63fe01fd20629718b48585dfb5323db6984076
+        run: |
+          set -euo pipefail
+          git fetch origin "$TARGET_BRANCH"
+          git checkout -B publish-target "origin/$TARGET_BRANCH"
+          git read-tree --reset -u "$STABLE_BASE"
+          git clean -fdx
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+          git apply --check /tmp/core-stable-restoration.patch
+          git apply /tmp/core-stable-restoration.patch
+          git diff --check
+
+          sh tests/run_multiplayer_state_tests.sh
+          sh tests/run_multiplayer_field_tests.sh
+
+          git config user.name "sedopeo254-oss"
+          git config user.email "sedopeo254@gmail.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Restore stable 3v1 and fix LP, graves, targeting and replay"
+          git push origin HEAD:"$TARGET_BRANCH"

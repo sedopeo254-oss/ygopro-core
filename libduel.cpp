@@ -77,6 +77,33 @@ uint8_t ResolveEffectLogicalPlayer(field* game_field, uint8_t playerid) {
 	return game_field->multiplayer.logical_player(playerid, game_field->get_effect_duelist(playerid));
 }
 
+MultiplayerState::player_mask_t GetLogicalPlayerMask(field* game_field,
+		uint8_t playerid, bool include_self, bool include_teammates,
+		bool include_opponents) {
+	if(!game_field->multiplayer.enabled() || playerid > 1)
+		return 0;
+	const auto origin = ResolveEffectLogicalPlayer(game_field, playerid);
+	if(origin >= game_field->multiplayer.player_count())
+		return 0;
+	const auto origin_team = game_field->multiplayer.team_of(origin);
+	MultiplayerState::player_mask_t mask = 0;
+	for(uint8_t logical = 0;
+			logical < game_field->multiplayer.player_count(); ++logical) {
+		if(!game_field->multiplayer.is_card_effect_player_available(logical))
+			continue;
+		const bool same_player = logical == origin;
+		const bool teammate = !same_player
+			&& origin_team != MultiplayerState::NO_TEAM
+			&& game_field->multiplayer.team_of(logical) == origin_team;
+		const bool opponent = game_field->multiplayer.are_opponents(origin, logical);
+		if((include_self && same_player)
+				|| (include_teammates && teammate)
+				|| (include_opponents && opponent))
+			mask |= static_cast<MultiplayerState::player_mask_t>(1u) << logical;
+	}
+	return mask;
+}
+
 LUA_STATIC_FUNCTION(EnableGlobalFlag) {
 	check_param_count(L, 1);
 	// noop
@@ -125,6 +152,21 @@ LUA_STATIC_FUNCTION(GetLogicalPlayer) {
 		lua_pushnil(L);
 	else
 		lua_pushinteger(L, logical_player);
+	return 1;
+}
+LUA_STATIC_FUNCTION(IsThreeVsOne) {
+	lua_pushboolean(L, pduel->game_field->multiplayer.mode()
+		== MultiplayerMode::THREE_V_ONE);
+	return 1;
+}
+LUA_STATIC_FUNCTION(GetLogicalPlayerMask) {
+	check_param_count(L, 4);
+	const auto playerid = lua_get<uint8_t>(L, 1);
+	const auto include_self = lua_get<bool>(L, 2);
+	const auto include_teammates = lua_get<bool>(L, 3);
+	const auto include_opponents = lua_get<bool>(L, 4);
+	lua_pushinteger(L, GetLogicalPlayerMask(pduel->game_field, playerid,
+		include_self, include_teammates, include_opponents));
 	return 1;
 }
 LUA_STATIC_FUNCTION(GetLogicalPlayerSide) {
@@ -1723,25 +1765,48 @@ LUA_STATIC_FUNCTION(ChangeAttackTarget) {
 	pduel->game_field->get_attack_target(attacker, &cv, pduel->game_field->core.chain_attack);
 	if(((target && std::find(cv.begin(), cv.end(), target) != cv.end()) || ignore) ||
 		(!target && !attacker->is_affected_by_effect(EFFECT_CANNOT_DIRECT_ATTACK))) {
-		pduel->game_field->core.attack_target = target;
-		pduel->game_field->core.attack_rollback = false;
-		pduel->game_field->core.opp_mzone.clear();
-		uint8_t turnp = pduel->game_field->infos.turn_player;
-		for(auto& pcard : pduel->game_field->player[1 - turnp].list_mzone) {
-			if(pcard)
-				pduel->game_field->core.opp_mzone.insert(pcard->fieldid_r);
-		}
-		if(pduel->game_field->multiplayer.uses_independent_fields()) {
-			auto& multiplayer = pduel->game_field->multiplayer;
-			const auto attacker_logical = multiplayer.logical_player(
+		auto& game_field = *pduel->game_field;
+		auto& multiplayer = game_field.multiplayer;
+		auto& core = game_field.core;
+		core.attack_target = target;
+		core.attack_rollback = false;
+		uint8_t attacker_logical = MultiplayerState::NO_PLAYER;
+		uint8_t target_logical = MultiplayerState::NO_PLAYER;
+		if(multiplayer.enabled()) {
+			attacker_logical = multiplayer.logical_player(
 				attacker->current.controler, attacker->current.duelist);
-			const auto target_logical = target
+			target_logical = target
 				? multiplayer.logical_player(
 					target->current.controler, target->current.duelist)
-				: pduel->game_field->core.attack_target_logical;
-			pduel->game_field->publish_multiplayer_replay_view(
-				attacker_logical, target_logical);
+				: core.attack_target_logical;
+			core.attack_target_logical = target_logical;
+			core.attack_target_duelist = target
+				? target->current.duelist
+				: multiplayer.duelist_index_of(target_logical);
 		}
+		core.opp_mzone.clear();
+		uint8_t turnp = game_field.infos.turn_player;
+		if(multiplayer.uses_logical_effect_scopes()
+				&& multiplayer.is_active(target_logical)) {
+			const auto target_side = multiplayer.field_side_of(target_logical);
+			const auto target_duelist = multiplayer.duelist_index_of(target_logical);
+			for(uint8_t sequence = 0; sequence < 7; ++sequence) {
+				const auto index = static_cast<size_t>(target_duelist) * 7u + sequence;
+				if(index >= game_field.player[target_side].list_mzone.size())
+					break;
+				if(const auto* pcard = game_field.player[target_side].list_mzone[index])
+					core.opp_mzone.insert(pcard->fieldid_r);
+			}
+		} else {
+			for(auto& pcard : game_field.player[1 - turnp].list_mzone) {
+				if(pcard)
+					core.opp_mzone.insert(pcard->fieldid_r);
+			}
+		}
+		if(multiplayer.enabled() && multiplayer.is_active(attacker_logical)
+				&& multiplayer.is_active(target_logical))
+			game_field.publish_multiplayer_replay_view(
+				attacker_logical, target_logical);
 		auto message = pduel->new_message(MSG_ATTACK);
 		message->write(attacker->get_info_location());
 		if(target) {
@@ -1759,18 +1824,8 @@ LUA_STATIC_FUNCTION(ChangeAttackTarget) {
 			pduel->game_field->core.attack_player = TRUE;
 			message->write(loc_info{});
 		}
-		if(pduel->game_field->multiplayer.enabled()) {
-			auto& multiplayer = pduel->game_field->multiplayer;
-			const auto attacker_logical = multiplayer.logical_player(
-				attacker->current.controler, attacker->current.duelist);
-			const auto target_logical = target
-				? multiplayer.logical_player(target->current.controler, target->current.duelist)
-				: pduel->game_field->core.attack_target_logical;
-			pduel->game_field->core.attack_target_logical = target_logical;
-			pduel->game_field->core.attack_target_duelist = target
-				? target->current.duelist : multiplayer.duelist_index_of(target_logical);
-			if(multiplayer.uses_independent_fields())
-				message->write<uint8_t>(attacker_logical);
+		if(multiplayer.enabled()) {
+			message->write<uint8_t>(attacker_logical);
 			message->write<uint8_t>(target_logical);
 		}
 		lua_pushboolean(L, 1);
@@ -2667,6 +2722,29 @@ LUA_STATIC_FUNCTION(IsExistingMatchingCard) {
 	return 1;
 }
 /**
+* \brief Duel.IsExistingMatchingCardLogical
+* \param filter_func, self, logical_player_mask, location, count,
+*        exception card, (extraargs...)
+* \return boolean
+*/
+LUA_STATIC_FUNCTION(IsExistingMatchingCardLogical) {
+	check_param_count(L, 6);
+	const auto findex = lua_get<function>(L, 1);
+	card* pexception = nullptr;
+	group* pexgroup = nullptr;
+	if((pexception = lua_get<card*>(L, 6)) == nullptr)
+		pexgroup = lua_get<group*>(L, 6);
+	const uint32_t extraargs = lua_gettop(L) - 6;
+	const auto self = lua_get<uint8_t>(L, 2);
+	const auto logical_mask = lua_get<uint32_t>(L, 3);
+	const auto location = lua_get<uint16_t>(L, 4);
+	const auto fcount = lua_get<uint32_t>(L, 5);
+	lua_pushboolean(L, pduel->game_field->filter_matching_card(
+		findex, self, 0, 0, nullptr, pexception, pexgroup, extraargs,
+		nullptr, fcount, false, logical_mask, location));
+	return 1;
+}
+/**
 * \brief Duel.SelectMatchingCards
 * \param playerid, filter_func, self, location1, location2, min, max, exception card, (extraargs...)
 * \return Group
@@ -2699,6 +2777,46 @@ LUA_STATIC_FUNCTION(SelectMatchingCard) {
 	pduel->game_field->filter_matching_card(findex, self, location1, location2, pgroup, pexception, pexgroup, extraargs);
 	pduel->game_field->core.select_cards.assign(pgroup->container.begin(), pgroup->container.end());
 	pduel->game_field->emplace_process<Processors::SelectCard>(playerid, cancelable, min, max);
+	return push_return_cards(L, cancelable);
+}
+/**
+* \brief Duel.SelectMatchingCardLogical
+* \param playerid, filter_func, self, logical_player_mask, location, min,
+*        max, exception card, (extraargs...)
+* \return Group
+*/
+LUA_STATIC_FUNCTION(SelectMatchingCardLogical) {
+	check_action_permission(L);
+	check_param_count(L, 8);
+	const auto findex = lua_get<function>(L, 2);
+	card* pexception = nullptr;
+	group* pexgroup = nullptr;
+	bool cancelable = false;
+	uint8_t lastarg = 8;
+	if(lua_isboolean(L, lastarg)) {
+		check_param_count(L, 9);
+		cancelable = lua_get<bool, false>(L, lastarg);
+		++lastarg;
+	}
+	if((pexception = lua_get<card*>(L, lastarg)) == nullptr)
+		pexgroup = lua_get<group*>(L, lastarg);
+	const uint32_t extraargs = lua_gettop(L) - lastarg;
+	const auto playerid = lua_get<uint8_t>(L, 1);
+	if(playerid != 0 && playerid != 1)
+		return 0;
+	const auto self = lua_get<uint8_t>(L, 3);
+	const auto logical_mask = lua_get<uint32_t>(L, 4);
+	const auto location = lua_get<uint16_t>(L, 5);
+	const auto min = lua_get<uint16_t>(L, 6);
+	const auto max = lua_get<uint16_t>(L, 7);
+	auto pgroup = pduel->new_group();
+	pduel->game_field->filter_matching_card(
+		findex, self, 0, 0, pgroup, pexception, pexgroup, extraargs,
+		nullptr, 0, false, logical_mask, location);
+	pduel->game_field->core.select_cards.assign(
+		pgroup->container.begin(), pgroup->container.end());
+	pduel->game_field->emplace_process<Processors::SelectCard>(
+		playerid, cancelable, min, max);
 	return push_return_cards(L, cancelable);
 }
 LUA_STATIC_FUNCTION(SelectCardsFromCodes) {
@@ -3037,6 +3155,29 @@ LUA_STATIC_FUNCTION(IsExistingTarget) {
 	return 1;
 }
 /**
+* \brief Duel.IsExistingTargetLogical
+* \param filter_func, self, logical_player_mask, location, count,
+*        exception card, (extraargs...)
+* \return boolean
+*/
+LUA_STATIC_FUNCTION(IsExistingTargetLogical) {
+	check_param_count(L, 6);
+	const auto findex = lua_get<function>(L, 1);
+	card* pexception = nullptr;
+	group* pexgroup = nullptr;
+	if((pexception = lua_get<card*>(L, 6)) == nullptr)
+		pexgroup = lua_get<group*>(L, 6);
+	const uint32_t extraargs = lua_gettop(L) - 6;
+	const auto self = lua_get<uint8_t>(L, 2);
+	const auto logical_mask = lua_get<uint32_t>(L, 3);
+	const auto location = lua_get<uint16_t>(L, 4);
+	const auto count = lua_get<uint16_t>(L, 5);
+	lua_pushboolean(L, pduel->game_field->filter_matching_card(
+		findex, self, 0, 0, nullptr, pexception, pexgroup, extraargs,
+		nullptr, count, true, logical_mask, location));
+	return 1;
+}
+/**
 * \brief Duel.SelectTarget
 * \param playerid, filter_func, self, location1, location2, min, max, exception card, (extraargs...)
 * \return Group
@@ -3091,6 +3232,84 @@ LUA_STATIC_FUNCTION(SelectTarget) {
 				for(auto& pcard : pret->container) {
 					pcard->create_relation(*ch);
 					if(peffect->is_flag(EFFECT_FLAG_CARD_TARGET)) {
+						pduel->game_field->publish_multiplayer_effect_view(
+							peffect, pcard);
+						auto message = pduel->new_message(MSG_BECOME_TARGET);
+						message->write<uint32_t>(1);
+						message->write(pcard->get_info_location());
+					}
+				}
+				interpreter::pushobject(L, pret);
+			}
+		}
+		return 1;
+	});
+}
+/**
+* \brief Duel.SelectTargetLogical
+* \param playerid, filter_func, self, logical_player_mask, location, min,
+*        max, exception card, (extraargs...)
+* \return Group
+*/
+LUA_STATIC_FUNCTION(SelectTargetLogical) {
+	check_action_permission(L);
+	check_param_count(L, 8);
+	const auto findex = lua_get<function>(L, 2);
+	card* pexception = nullptr;
+	group* pexgroup = nullptr;
+	bool cancelable = false;
+	uint8_t lastarg = 8;
+	if(lua_isboolean(L, lastarg)) {
+		check_param_count(L, 9);
+		cancelable = lua_get<bool, false>(L, lastarg);
+		++lastarg;
+	}
+	if((pexception = lua_get<card*>(L, lastarg)) == nullptr)
+		pexgroup = lua_get<group*>(L, lastarg);
+	const uint32_t extraargs = lua_gettop(L) - lastarg;
+	const auto playerid = lua_get<uint8_t>(L, 1);
+	if(playerid != 0 && playerid != 1)
+		return 0;
+	const auto self = lua_get<uint8_t>(L, 3);
+	const auto logical_mask = lua_get<uint32_t>(L, 4);
+	const auto location = lua_get<uint16_t>(L, 5);
+	const auto min = lua_get<uint16_t>(L, 6);
+	const auto max = lua_get<uint16_t>(L, 7);
+	if(pduel->game_field->core.current_chain.empty())
+		return 0;
+	auto pgroup = pduel->new_group();
+	pduel->game_field->filter_matching_card(
+		findex, self, 0, 0, pgroup, pexception, pexgroup, extraargs,
+		nullptr, 0, true, logical_mask, location);
+	pduel->game_field->core.select_cards.assign(
+		pgroup->container.begin(), pgroup->container.end());
+	pduel->game_field->emplace_process<Processors::SelectCard>(
+		playerid, cancelable, min, max);
+	return yieldk({
+		if(pduel->game_field->return_cards.canceled) {
+			lua_pushnil(L);
+			return 1;
+		}
+		chain* ch = pduel->game_field->get_chain(0);
+		if(ch) {
+			if(!ch->target_cards) {
+				ch->target_cards = pduel->new_group();
+				ch->target_cards->is_readonly = true;
+			}
+			ch->target_cards->container.insert(
+				pduel->game_field->return_cards.list.begin(),
+				pduel->game_field->return_cards.list.end());
+			effect* peffect = ch->triggering_effect;
+			if(peffect->type & EFFECT_TYPE_CONTINUOUS) {
+				interpreter::pushobject(L, ch->target_cards);
+			} else {
+				auto pret = pduel->new_group(
+					pduel->game_field->return_cards.list);
+				for(auto& pcard : pret->container) {
+					pcard->create_relation(*ch);
+					if(peffect->is_flag(EFFECT_FLAG_CARD_TARGET)) {
+						pduel->game_field->publish_multiplayer_effect_view(
+							peffect, pcard);
 						auto message = pduel->new_message(MSG_BECOME_TARGET);
 						message->write<uint32_t>(1);
 						message->write(pcard->get_info_location());
@@ -3204,6 +3423,11 @@ LUA_STATIC_FUNCTION(SetTargetCard) {
 				_pcard->create_relation(*ch);
 		}
 		if(peffect->is_flag(EFFECT_FLAG_CARD_TARGET)) {
+			card* replay_target = pcard;
+			if(!replay_target && pgroup && !pgroup->container.empty())
+				replay_target = *pgroup->container.begin();
+			pduel->game_field->publish_multiplayer_effect_view(
+				peffect, replay_target);
 			auto message = pduel->new_message(MSG_BECOME_TARGET);
 			if(pcard) {
 				message->write<uint32_t>(1);
@@ -3451,6 +3675,13 @@ LUA_STATIC_FUNCTION(HintSelection) {
 	check_param_count(L, 1);
 	auto [pcard, pgroup] = lua_get_card_or_group(L, 1);
 	bool selection = lua_get<bool, true>(L, 2);
+	if(!selection) {
+		card* replay_target = pcard;
+		if(!replay_target && pgroup && !pgroup->container.empty())
+			replay_target = *pgroup->container.begin();
+		pduel->game_field->publish_multiplayer_effect_view(
+			pduel->game_field->core.reason_effect, replay_target);
+	}
 	auto message = pduel->new_message(selection ? MSG_CARD_SELECTED : MSG_BECOME_TARGET);
 	if(pcard) {
 		message->write<uint32_t>(1);

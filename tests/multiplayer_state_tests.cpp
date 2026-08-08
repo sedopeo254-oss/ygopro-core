@@ -100,8 +100,22 @@ void test_three_vs_one_team_winner() {
 		"a surviving 3 vs 1 teammate must be able to protect the victim");
 	expect(!state.can_intercept(0, 3, 1),
 		"the allied trio must not intercept damage aimed at their opponent");
+	expect(state.uses_logical_effect_scopes(),
+		"3 vs 1 card effects must distinguish the three allied fields");
+	expect(state.shares_card_effect_scope(1, 1)
+			&& !state.shares_card_effect_scope(1, 0),
+		"a script's own field must mean the exact logical duelist only");
+	expect(state.is_other_card_effect_player(1, 0)
+			&& state.is_other_card_effect_player(1, 2)
+			&& state.is_other_card_effect_player(1, 3)
+			&& !state.are_opponents(1, 0)
+			&& state.are_opponents(1, 3),
+		"3 vs 1 card scope must reach every other duelist without changing team relations");
 	expect(state.eliminate(0, PlayerEliminationReason::LP), "first team member elimination must succeed");
 	expect(!state.has_winner(), "one eliminated team member must not end 3 vs 1");
+	expect(state.is_card_effect_player_available(0)
+			&& state.is_other_card_effect_player(1, 0),
+		"an eliminated anime teammate's persistent field must remain addressable by card effects");
 	expect(state.eliminate(1, PlayerEliminationReason::LP), "second team member elimination must succeed");
 	expect(!state.has_winner(), "two eliminated team members must not end 3 vs 1");
 	expect(state.eliminate(2, PlayerEliminationReason::LP), "last team member elimination must succeed");

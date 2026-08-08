@@ -288,12 +288,12 @@ void field::publish_multiplayer_config() {
 }
 
 void field::publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent) {
-	if(!multiplayer.uses_independent_fields()
+	if(!multiplayer.enabled() || multiplayer.player_count() < 3
 			|| primary >= MultiplayerState::MAX_PLAYERS
 			|| opponent >= MultiplayerState::MAX_PLAYERS
 			|| primary == opponent
-			|| !multiplayer.is_active(primary)
-			|| !multiplayer.is_active(opponent))
+			|| !multiplayer.is_card_effect_player_available(primary)
+			|| !multiplayer.is_card_effect_player_available(opponent))
 		return;
 	auto message = pduel->new_message(MSG_MULTIPLAYER_REPLAY_VIEW);
 	message->write<uint8_t>(primary);
@@ -305,6 +305,23 @@ void field::publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent) {
 	publish_multiplayer_private_piles(opponent);
 }
 
+void field::publish_multiplayer_effect_view(effect* source_effect, card* target) {
+	if(!multiplayer.enabled() || !source_effect || !target)
+		return;
+	const auto* source = source_effect->get_handler();
+	if(!source || source->current.controler > 1 || target->current.controler > 1)
+		return;
+	const auto source_logical = multiplayer.logical_player(
+		source->current.controler, source->current.duelist);
+	const auto target_logical = multiplayer.logical_player(
+		target->current.controler, target->current.duelist);
+	if(source_logical == MultiplayerState::NO_PLAYER
+			|| target_logical == MultiplayerState::NO_PLAYER
+			|| source_logical == target_logical)
+		return;
+	publish_multiplayer_replay_view(source_logical, target_logical);
+}
+
 uint8_t field::get_effect_duelist(uint8_t playerid) const {
 	if(!multiplayer.enabled() || playerid > 1 || !core.reason_effect)
 		return player[playerid].current_duelist;
@@ -312,6 +329,50 @@ uint8_t field::get_effect_duelist(uint8_t playerid) const {
 	if(handler && handler->current.controler == playerid)
 		return handler->current.duelist;
 	return player[playerid].current_duelist;
+}
+bool field::matches_script_controller(const card* pcard, uint8_t requested,
+		bool previous) const {
+	if(!pcard || requested > 1)
+		return false;
+	const auto& state = previous ? pcard->previous : pcard->current;
+	if(!multiplayer.uses_logical_effect_scopes())
+		return state.controler == requested;
+
+	// Card scripts only expose the two legacy player ids. Resolve those ids
+	// relative to the exact logical duelist whose effect is being evaluated:
+	// `tp` means that duelist, while anime 3-vs-1 treats `1-tp` as every other
+	// logical field. Team and victory relationships remain unchanged.
+	const effect* context = core.reason_effect;
+	if(!context && !core.current_chain.empty())
+		context = core.current_chain.back().triggering_effect;
+	if(!context && !core.new_chains.empty())
+		context = core.new_chains.back().triggering_effect;
+	const auto* handler = context ? context->get_handler() : nullptr;
+	uint8_t origin_side = PLAYER_NONE;
+	uint8_t origin_duelist = MultiplayerState::NO_PLAYER;
+	if(handler && handler->current.controler < 2) {
+		origin_side = handler->current.controler;
+		origin_duelist = handler->current.duelist;
+	} else if(core.reason_player < 2) {
+		origin_side = core.reason_player;
+		origin_duelist = player[origin_side].current_duelist;
+	}
+	if(origin_side > 1 || origin_duelist == MultiplayerState::NO_PLAYER)
+		return state.controler == requested;
+	const auto origin_logical = multiplayer.logical_player(
+		origin_side, origin_duelist);
+	const auto target_logical = multiplayer.logical_player(
+		state.controler, state.duelist);
+	if(origin_logical == MultiplayerState::NO_PLAYER
+			|| target_logical == MultiplayerState::NO_PLAYER)
+		return state.controler == requested;
+	if(requested == origin_side)
+		return multiplayer.shares_card_effect_scope(
+			origin_logical, target_logical);
+	if(requested == static_cast<uint8_t>(1 - origin_side))
+		return multiplayer.is_other_card_effect_player(
+			origin_logical, target_logical);
+	return false;
 }
 uint8_t field::get_response_player(uint8_t playerid) const {
 	if(!multiplayer.enabled() || playerid > 1)
@@ -557,6 +618,12 @@ void field::remove_card(card* pcard) {
 // 5. move_card()
 // check Fusion/S/X monster redirection by the rule
 bool field::move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone) {
+	// A card always returns to its owner's Graveyard. In a multi-field Duel the
+	// effect may have selected it from another teammate's or opponent's field,
+	// so relying on the caller's physical side can silently place it in the
+	// active duelist's Graveyard instead of its owner's saved pile.
+	if(multiplayer.enabled() && location == LOCATION_GRAVE && pcard->owner < 2)
+		playerid = pcard->owner;
 	uint8_t preplayer = pcard->current.controler;
 	uint8_t presequence = pcard->current.sequence;
 	const auto target_duelist = static_cast<uint8_t>((location & LOCATION_ONFIELD)
@@ -1524,6 +1591,11 @@ void field::tag_swap(uint8_t playerid) {
 			message->write<uint32_t>(pcard->data.code);
 			message->write<uint32_t>(pcard->current.position);
 		}
+		// Keep the private-pile owner authoritative. Deriving this from the
+		// mutable active-seat map made P1/P4 names and Graveyards swap during
+		// replay seeks and rapid turn changes.
+		message->write<uint8_t>(multiplayer.logical_player(
+			playerid, player[playerid].current_duelist));
 	}
 	player[playerid].tag_index = (player[playerid].tag_index + 1) % player[playerid].extra_lists_main.size();
 	if(multiplayer.enabled()) {
@@ -1869,14 +1941,14 @@ void field::filter_affected_cards(effect* peffect, card_set* cset) {
 	uint8_t self = peffect->get_handler_player();
 	if(self == PLAYER_NONE)
 		return;
-	if(multiplayer.uses_independent_fields() && peffect->get_handler()) {
+	if(multiplayer.uses_logical_effect_scopes() && peffect->get_handler()) {
 		const auto* handler = peffect->get_handler();
 		const auto handler_logical = multiplayer.logical_player(
 			handler->current.controler, handler->current.duelist);
 		auto range_for = [&](uint8_t logical) -> uint16_t {
-			if(logical == handler_logical)
+			if(multiplayer.shares_card_effect_scope(handler_logical, logical))
 				return peffect->s_range;
-			return multiplayer.are_opponents(handler_logical, logical)
+			return multiplayer.is_other_card_effect_player(handler_logical, logical)
 				? peffect->o_range : 0;
 		};
 		auto add_if_target = [&](card* pcard) {
@@ -1897,7 +1969,7 @@ void field::filter_affected_cards(effect* peffect, card_set* cset) {
 			LOCATION_GRAVE, LOCATION_REMOVED, LOCATION_HAND, LOCATION_DECK, LOCATION_EXTRA
 		};
 		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
-			if(!multiplayer.is_active(logical))
+			if(!multiplayer.is_card_effect_player_available(logical))
 				continue;
 			const auto range = range_for(logical);
 			const auto side = multiplayer.field_side_of(logical);
@@ -1946,14 +2018,14 @@ void field::filter_inrange_cards(effect* peffect, card_set* cset) {
 	uint8_t self = peffect->get_handler_player();
 	if(self == PLAYER_NONE)
 		return;
-	if(multiplayer.uses_independent_fields() && peffect->get_handler()) {
+	if(multiplayer.uses_logical_effect_scopes() && peffect->get_handler()) {
 		const auto* handler = peffect->get_handler();
 		const auto handler_logical = multiplayer.logical_player(
 			handler->current.controler, handler->current.duelist);
 		auto range_for = [&](uint8_t logical) -> uint16_t {
-			if(logical == handler_logical)
+			if(multiplayer.shares_card_effect_scope(handler_logical, logical))
 				return peffect->s_range;
-			return multiplayer.are_opponents(handler_logical, logical)
+			return multiplayer.is_other_card_effect_player(handler_logical, logical)
 				? peffect->o_range : 0;
 		};
 		auto add_if_fit = [&](card* pcard, uint16_t range) {
@@ -1985,7 +2057,7 @@ void field::filter_inrange_cards(effect* peffect, card_set* cset) {
 			LOCATION_GRAVE, LOCATION_REMOVED, LOCATION_HAND, LOCATION_DECK, LOCATION_EXTRA
 		};
 		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
-			if(!multiplayer.is_active(logical))
+			if(!multiplayer.is_card_effect_player_available(logical))
 				continue;
 			const auto range = range_for(logical);
 			const auto side = multiplayer.field_side_of(logical);
@@ -2034,7 +2106,7 @@ void field::filter_player_effect(uint8_t playerid, uint32_t code, effect_set* es
 	for (; rg.first != rg.second; ++rg.first) {
 		effect* peffect = rg.first->second;
 		bool targets_player = peffect->is_target_player(playerid);
-		if(multiplayer.uses_independent_fields()
+		if(multiplayer.uses_logical_effect_scopes()
 				&& duelist != 0xff && !peffect->is_flag(EFFECT_FLAG_ABSOLUTE_TARGET)) {
 			const auto* handler = peffect->get_handler();
 			if(handler) {
@@ -2043,7 +2115,7 @@ void field::filter_player_effect(uint8_t playerid, uint32_t code, effect_set* es
 				const auto target_logical = multiplayer.logical_player(playerid, duelist);
 				const bool same_player = handler_logical == target_logical;
 				targets_player = same_player ? peffect->s_range
-					: multiplayer.are_opponents(handler_logical, target_logical)
+					: multiplayer.is_other_card_effect_player(handler_logical, target_logical)
 						&& peffect->o_range;
 			}
 		}
@@ -2053,7 +2125,11 @@ void field::filter_player_effect(uint8_t playerid, uint32_t code, effect_set* es
 	if(sort)
 		std::sort(eset->begin(), eset->end(), effect_sort_id);
 }
-int32_t field::filter_matching_card(int32_t findex, uint8_t self, uint32_t location1, uint32_t location2, group* pgroup, card* pexception, group* pexgroup, uint32_t extraargs, card** pret, int32_t fcount, bool is_target) {
+int32_t field::filter_matching_card(int32_t findex, uint8_t self,
+		uint32_t location1, uint32_t location2, group* pgroup,
+		card* pexception, group* pexgroup, uint32_t extraargs,
+		card** pret, int32_t fcount, bool is_target,
+		uint32_t logical_mask, uint32_t logical_location) {
 	if(self != 0 && self != 1)
 		return FALSE;
 	int32_t count = 0;
@@ -2092,18 +2168,37 @@ int32_t field::filter_matching_card(int32_t findex, uint8_t self, uint32_t locat
 		uint32_t location;
 	};
 	std::vector<effect_scope> scopes;
-	if(multiplayer.uses_independent_fields()) {
-		const auto origin_duelist = get_effect_duelist(self);
-		const auto origin_logical = multiplayer.logical_player(self, origin_duelist);
-		scopes.push_back({ self, origin_duelist, location1 });
-		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
-			if(!multiplayer.is_active(logical)
-					|| !multiplayer.are_opponents(origin_logical, logical))
+	const bool explicit_logical_scope = multiplayer.enabled() && logical_mask != 0;
+	const bool logical_effect_scope = explicit_logical_scope
+		|| multiplayer.uses_logical_effect_scopes();
+	if(explicit_logical_scope) {
+		for(uint8_t logical = 0; logical < multiplayer.player_count(); ++logical) {
+			if(!(logical_mask & (1u << logical))
+					|| !multiplayer.is_card_effect_player_available(logical))
 				continue;
 			scopes.push_back({
 				multiplayer.field_side_of(logical),
 				multiplayer.duelist_index_of(logical),
-				location2
+				logical_location
+			});
+		}
+	} else if(logical_effect_scope) {
+		const auto origin_duelist = get_effect_duelist(self);
+		const auto origin_logical = multiplayer.logical_player(self, origin_duelist);
+		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
+			if(!multiplayer.is_card_effect_player_available(logical))
+				continue;
+			uint32_t location = 0;
+			if(multiplayer.shares_card_effect_scope(origin_logical, logical))
+				location = location1;
+			else if(multiplayer.is_other_card_effect_player(origin_logical, logical))
+				location = location2;
+			else
+				continue;
+			scopes.push_back({
+				multiplayer.field_side_of(logical),
+				multiplayer.duelist_index_of(logical),
+				location
 			});
 		}
 	} else {
@@ -2115,7 +2210,7 @@ int32_t field::filter_matching_card(int32_t findex, uint8_t self, uint32_t locat
 		const auto side = scope.side;
 		const auto logical_duelist = scope.duelist;
 		const auto location = scope.location;
-		const bool isolate_duelist = multiplayer.uses_independent_fields();
+		const bool isolate_duelist = logical_effect_scope;
 		auto scope_mzonechk = [&](auto* pcard) {
 			return (!isolate_duelist || pcard == nullptr
 				|| pcard->current.duelist == logical_duelist) && mzonechk(pcard);
@@ -2203,18 +2298,24 @@ int32_t field::filter_field_card(uint8_t self, uint32_t location1, uint32_t loca
 		uint32_t location;
 	};
 	std::vector<effect_scope> scopes;
-	if(multiplayer.uses_independent_fields()) {
+	const bool logical_effect_scope = multiplayer.uses_logical_effect_scopes();
+	if(logical_effect_scope) {
 		const auto origin_duelist = get_effect_duelist(self);
 		const auto origin_logical = multiplayer.logical_player(self, origin_duelist);
-		scopes.push_back({ self, origin_duelist, location1 });
 		for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
-			if(!multiplayer.is_active(logical)
-					|| !multiplayer.are_opponents(origin_logical, logical))
+			if(!multiplayer.is_card_effect_player_available(logical))
+				continue;
+			uint32_t location = 0;
+			if(multiplayer.shares_card_effect_scope(origin_logical, logical))
+				location = location1;
+			else if(multiplayer.is_other_card_effect_player(origin_logical, logical))
+				location = location2;
+			else
 				continue;
 			scopes.push_back({
 				multiplayer.field_side_of(logical),
 				multiplayer.duelist_index_of(logical),
-				location2
+				location
 			});
 		}
 	} else {
@@ -2226,7 +2327,7 @@ int32_t field::filter_field_card(uint8_t self, uint32_t location1, uint32_t loca
 		const auto side = scope.side;
 		const auto logical_duelist = scope.duelist;
 		const auto location = scope.location;
-		const bool isolate_duelist = multiplayer.uses_independent_fields();
+		const bool isolate_duelist = logical_effect_scope;
 		auto belongs_to_scope = [&](const card* pcard) {
 			return pcard && (!isolate_duelist
 				|| pcard->current.duelist == logical_duelist);

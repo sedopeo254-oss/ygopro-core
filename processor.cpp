@@ -2076,12 +2076,15 @@ bool field::process(Processors::BattleCommand& arg) {
 					arg.attack_target_duelists.push_back(duelist);
 			}
 			if(arg.attack_target_duelists.empty()) {
+				core.attack_target_logical = MultiplayerState::NO_PLAYER;
 				core.attack_target_duelist = 0xff;
 				arg.attack_announce_failed = true;
 				arg.step = 6;
 				return FALSE;
 			}
 			core.attack_target_duelist = arg.attack_target_duelists.front();
+			core.attack_target_logical = multiplayer.logical_player(
+				0, core.attack_target_duelist);
 			if(arg.attack_target_duelists.size() > 1) {
 				core.select_options.clear();
 				for(const auto duelist : arg.attack_target_duelists) {
@@ -2111,10 +2114,20 @@ bool field::process(Processors::BattleCommand& arg) {
 		} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1
 				&& arg.attack_target_duelists.size() > 1) {
 			const auto selected = static_cast<size_t>(returns.at<int32_t>(0));
+			if(selected >= arg.attack_target_duelists.size()) {
+				core.attack_target_logical = MultiplayerState::NO_PLAYER;
+				core.attack_target_duelist = MultiplayerState::NO_PLAYER;
+				arg.attack_target_duelists.clear();
+				arg.attack_announce_failed = true;
+				arg.step = 6;
+				return FALSE;
+			}
 			core.attack_target_duelist = arg.attack_target_duelists[selected];
+			core.attack_target_logical = multiplayer.logical_player(
+				0, core.attack_target_duelist);
 		}
 		arg.attack_target_duelists.clear();
-		if(multiplayer.uses_independent_fields()
+		if(multiplayer.enabled()
 				&& core.attacker
 				&& multiplayer.is_active(core.attack_target_logical)) {
 			const auto attacker_logical = multiplayer.logical_player(
@@ -2137,7 +2150,9 @@ bool field::process(Processors::BattleCommand& arg) {
 			if(!arg.attack_interceptors.empty()) {
 				arg.attack_interceptor_index = 0;
 				const auto logical_player = arg.attack_interceptors.front();
-				emplace_process<Processors::SelectYesNo>(static_cast<uint8_t>(logical_player + 2), MULTIPLAYER_TAKE_ATTACK_DESC);
+				emplace_process<Processors::SelectYesNo>(
+					multiplayer.prompt_player_of(logical_player),
+					MULTIPLAYER_TAKE_ATTACK_DESC);
 				arg.step = 43;
 				return FALSE;
 			}
@@ -2241,13 +2256,11 @@ bool field::process(Processors::BattleCommand& arg) {
 		else
 			core.attack_target = return_cards.list[0];
 		if(core.attack_target) {
-			if(multiplayer.uses_independent_fields()) {
+			if(multiplayer.uses_logical_effect_scopes()) {
 				core.attack_target_logical = multiplayer.logical_player(
 					core.attack_target->current.controler, core.attack_target->current.duelist);
 				core.attack_target_duelist = core.attack_target->current.duelist;
-			} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE
-					&& core.attack_target->current.controler == 0)
-				core.attack_target_duelist = core.attack_target->current.duelist;
+			}
 			core.pre_field[1] = core.attack_target->fieldid_r;
 		} else
 			core.pre_field[1] = 0;
@@ -2277,7 +2290,7 @@ bool field::process(Processors::BattleCommand& arg) {
 		// Target selection, interception, or replay seeking may have changed the
 		// projected fields since the earlier selection prompt. Keeping these
 		// messages adjacent makes the replay arrow deterministic.
-		if(multiplayer.uses_independent_fields()
+		if(multiplayer.enabled()
 				&& core.attacker
 				&& multiplayer.is_active(core.attack_target_logical)) {
 			publish_multiplayer_replay_view(
@@ -2295,15 +2308,14 @@ bool field::process(Processors::BattleCommand& arg) {
 			} else {
 				message->write(loc_info{});
 			}
-			if(multiplayer.uses_independent_fields()) {
+			if(multiplayer.enabled()) {
 				message->write<uint8_t>(multiplayer.logical_player(
 					core.attacker->current.controler, core.attacker->current.duelist));
 				message->write<uint8_t>(core.attack_target_logical);
-			} else if(multiplayer.enabled())
-				message->write<uint8_t>(core.attack_target_logical);
+			}
 			core.attack_rollback = false;
 			core.opp_mzone.clear();
-			if(multiplayer.uses_independent_fields()
+			if(multiplayer.uses_logical_effect_scopes()
 					&& multiplayer.is_active(core.attack_target_logical)) {
 				const auto target_side = multiplayer.field_side_of(core.attack_target_logical);
 				const auto target_duelist = multiplayer.duelist_index_of(core.attack_target_logical);
@@ -2993,8 +3005,7 @@ bool field::process(Processors::BattleCommand& arg) {
 	case 44: {
 		if(returns.at<int32_t>(0)) {
 			const auto logical_player = arg.attack_interceptors[arg.attack_interceptor_index];
-			if(multiplayer.uses_independent_fields())
-				core.attack_target_logical = logical_player;
+			core.attack_target_logical = logical_player;
 			core.attack_target_duelist = multiplayer.duelist_index_of(logical_player);
 			arg.step = 3;
 			return FALSE;
@@ -3002,7 +3013,9 @@ bool field::process(Processors::BattleCommand& arg) {
 		++arg.attack_interceptor_index;
 		if(arg.attack_interceptor_index < arg.attack_interceptors.size()) {
 			const auto logical_player = arg.attack_interceptors[arg.attack_interceptor_index];
-			emplace_process<Processors::SelectYesNo>(static_cast<uint8_t>(logical_player + 2), MULTIPLAYER_TAKE_ATTACK_DESC);
+			emplace_process<Processors::SelectYesNo>(
+				multiplayer.prompt_player_of(logical_player),
+				MULTIPLAYER_TAKE_ATTACK_DESC);
 			arg.step = 43;
 			return FALSE;
 		}
@@ -3118,7 +3131,7 @@ bool field::process(Processors::DamageStep& arg) {
 		}
 		core.attacker->announced_cards.addcard(core.attack_target);
 		attack_all_target_check();
-		if(multiplayer.uses_independent_fields()
+		if(multiplayer.enabled()
 				&& multiplayer.is_active(core.attack_target_logical)) {
 			publish_multiplayer_replay_view(
 				multiplayer.logical_player(core.attacker->current.controler,
@@ -3132,7 +3145,7 @@ bool field::process(Processors::DamageStep& arg) {
 		} else {
 			message->write(loc_info{});
 		}
-		if(multiplayer.uses_independent_fields()) {
+		if(multiplayer.enabled()) {
 			message->write<uint8_t>(multiplayer.logical_player(
 				core.attacker->current.controler, core.attacker->current.duelist));
 			const auto target_logical = core.attack_target
@@ -3140,8 +3153,7 @@ bool field::process(Processors::DamageStep& arg) {
 					core.attack_target->current.duelist)
 				: core.attack_target_logical;
 			message->write<uint8_t>(target_logical);
-		} else if(multiplayer.enabled())
-			message->write<uint8_t>(core.attack_target_logical);
+		}
 		infos.phase = PHASE_DAMAGE;
 		(void)pduel->new_message(MSG_DAMAGE_STEP_START);
 		core.pre_field[0] = core.attacker->fieldid_r;
@@ -3599,7 +3611,9 @@ bool field::process(Processors::Turn& arg) {
 				for(uint8_t logical = 0; logical < multiplayer.player_count(); ++logical) {
 					const auto side = multiplayer.field_side_of(logical);
 					const auto duelist = multiplayer.duelist_index_of(logical);
-					logical_message->write<uint32_t>(get_logical_lp(side, duelist));
+					const auto logical_lp = get_logical_lp(side, duelist);
+					logical_message->write<uint32_t>(logical_lp > 0
+						? static_cast<uint32_t>(logical_lp) : 0u);
 					logical_message->write<uint32_t>(get_logical_list(side, LOCATION_DECK, duelist).size());
 					logical_message->write<uint32_t>(get_logical_list(side, LOCATION_HAND, duelist).size());
 					logical_message->write<uint32_t>(get_logical_list(side, LOCATION_EXTRA, duelist).size());
@@ -3612,6 +3626,16 @@ bool field::process(Processors::Turn& arg) {
 			// player, so sharing a core side never shares a hand or deck view.
 			publish_all_multiplayer_private_piles();
 			tag_swap_to(turn_player, multiplayer.duelist_index_of(logical_player));
+			// Record one stable two-player camera pair at every logical turn start.
+			// Live 3-vs-1 clients ignore this hint; replays use it to restore the
+			// exact active field and private piles instead of inheriting a stale swap.
+			for(uint8_t opponent = 0; opponent < multiplayer.player_count(); ++opponent) {
+				if(multiplayer.is_active(opponent)
+						&& multiplayer.are_opponents(logical_player, opponent)) {
+					publish_multiplayer_replay_view(logical_player, opponent);
+					break;
+				}
+			}
 		}
 		auto message = pduel->new_message(MSG_NEW_TURN);
 		message->write<uint8_t>(turn_player);
@@ -5340,7 +5364,7 @@ bool field::process(Processors::Adjust& arg) {
 			if(core.attack_rollback)
 				return FALSE;
 			std::set<uint32_t> fidset;
-			if(multiplayer.uses_independent_fields()
+			if(multiplayer.uses_logical_effect_scopes()
 					&& multiplayer.is_active(core.attack_target_logical)) {
 				const auto target_side = multiplayer.field_side_of(core.attack_target_logical);
 				const auto target_duelist = multiplayer.duelist_index_of(core.attack_target_logical);

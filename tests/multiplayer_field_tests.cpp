@@ -158,6 +158,23 @@ int main() {
 			"every 3v1 player must receive face-up Deck Master choices tagged with their own logical seat");
 	}
 
+	// 3-vs-1 replays use the same authoritative two-player camera packet as
+	// Battle Royale. Live Duels may ignore it, but recording it prevents replay
+	// seeks from inheriting the previous ally's field or private piles.
+	take_messages(game);
+	field.publish_multiplayer_replay_view(0, 3);
+	const auto three_v_one_replay_messages = take_messages(game);
+	expect(three_v_one_replay_messages.size() == 3
+			&& three_v_one_replay_messages[0].size() == 3
+			&& three_v_one_replay_messages[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& three_v_one_replay_messages[0][1] == 0
+			&& three_v_one_replay_messages[0][2] == 3
+			&& three_v_one_replay_messages[1][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& three_v_one_replay_messages[1][1] == 0
+			&& three_v_one_replay_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& three_v_one_replay_messages[2][1] == 3,
+		"3v1 replay camera changes must carry exact private-pile snapshots for both displayed players");
+
 	auto* tristan_hand = game.new_card(2003);
 	tristan_hand->owner = 0;
 	tristan_hand->owner_duelist = 1;
@@ -182,6 +199,46 @@ int main() {
 	expect(field.tag_swap_to(0, 1), "the active resources must switch back to Tristan");
 	expect(field.player[0].list_grave.size() == 1 && field.player[0].list_grave.front() == tristan,
 		"Tristan's graveyard must be restored with his card");
+
+	// The TAG_SWAP snapshot itself must name the exact logical owner. This is
+	// consumed by the server, client and replay instead of guessing from the
+	// mutable current-turn seat.
+	take_messages(game);
+	expect(field.tag_swap_to(0, 2), "the private resources must switch to Duke for an owner-tag test");
+	const auto duke_swap_messages = take_messages(game);
+	auto duke_swap = std::find_if(duke_swap_messages.begin(), duke_swap_messages.end(),
+		[](const auto& message) { return !message.empty() && message[0] == MSG_TAG_SWAP; });
+	expect(duke_swap != duke_swap_messages.end() && duke_swap->back() == 2,
+		"Duke's TAG_SWAP snapshot must end with logical player 2");
+	expect(field.tag_swap_to(0, 1), "the private resources must switch back to Tristan");
+	const auto tristan_swap_messages = take_messages(game);
+	auto tristan_swap = std::find_if(tristan_swap_messages.begin(), tristan_swap_messages.end(),
+		[](const auto& message) { return !message.empty() && message[0] == MSG_TAG_SWAP; });
+	expect(tristan_swap != tristan_swap_messages.end() && tristan_swap->back() == 1,
+		"Tristan's TAG_SWAP snapshot must end with logical player 1");
+	if(tristan_swap != tristan_swap_messages.end()) {
+		const auto ecount = read_u32(*tristan_swap, 6);
+		const auto hcount = read_u32(*tristan_swap, 14);
+		const auto grave_offset = 22u + static_cast<size_t>(ecount + hcount) * 8u;
+		expect(read_u32(*tristan_swap, grave_offset) == 1
+				&& read_u32(*tristan_swap, grave_offset + 8) == 2001,
+			"Tristan's exact snapshot must contain his own Graveyard card");
+	}
+
+	// A card temporarily controlled by Nezbitt still belongs in its exact
+	// owner's logical Graveyard, not in Nezbitt's or the currently displayed
+	// ally's pile.
+	auto* captured_tristan_card = game.new_card(2006);
+	captured_tristan_card->owner = 0;
+	captured_tristan_card->owner_duelist = 1;
+	field.add_card(1, captured_tristan_card, LOCATION_MZONE, 1, false, 0);
+	expect(field.move_card(1, captured_tristan_card, LOCATION_GRAVE, 0),
+		"an opponent-controlled allied card must be sent to its owner's Graveyard");
+	const auto& tristan_grave = field.get_logical_list(0, LOCATION_GRAVE, 1);
+	expect(std::find(tristan_grave.begin(), tristan_grave.end(), captured_tristan_card)
+			!= tristan_grave.end()
+			&& field.get_logical_list(1, LOCATION_GRAVE, 0).empty(),
+		"the captured card must be visible only in Tristan's Graveyard");
 
 	const auto tristan_hand_count = field.get_logical_list(0, LOCATION_HAND, 1).size();
 	const auto duke_hand_count = field.get_logical_list(0, LOCATION_HAND, 2).size();
@@ -222,6 +279,95 @@ int main() {
 	auto* nezbitt = game.new_card(3000);
 	nezbitt->owner = 1;
 	field.add_card(1, nezbitt, LOCATION_MZONE, 0);
+	serenity->current.position = POS_FACEUP_ATTACK;
+	duke->current.position = POS_FACEUP_ATTACK;
+	nezbitt->current.position = POS_FACEUP_ATTACK;
+	auto* tristan_board = game.new_card(3001);
+	tristan_board->owner = 0;
+	tristan_board->owner_duelist = 1;
+	tristan_board->current.position = POS_FACEUP_ATTACK;
+	field.add_card(0, tristan_board, LOCATION_MZONE, 1, false, 1);
+
+	// In anime 3-vs-1, normal `tp` still means the exact effect owner, while
+	// `1-tp` means every other logical duelist. This lets stock cards such as
+	// Block Attack affect a teammate without changing team/win relationships.
+	field.core.reason_effect = duke_effect;
+	expect(field.filter_field_card(0, LOCATION_MZONE, 0, nullptr) == 1,
+		"a 3v1 tp field query must contain only Duke's exact logical field");
+	const auto other_field_count = field.filter_field_card(
+		0, 0, LOCATION_MZONE, nullptr);
+	expect(other_field_count == 3,
+		"a 3v1 1-tp query must contain both teammates and Nezbitt");
+	expect(field.matches_script_controller(duke, 0)
+			&& !field.matches_script_controller(serenity, 0)
+			&& field.matches_script_controller(serenity, 1)
+			&& field.matches_script_controller(tristan_board, 1)
+			&& field.matches_script_controller(nezbitt, 1),
+		"Card.IsControler(tp/1-tp) must resolve exact-self versus every other 3v1 field");
+	take_messages(game);
+	field.publish_multiplayer_effect_view(duke_effect, serenity);
+	const auto teammate_target_view = take_messages(game);
+	expect(teammate_target_view.size() == 3
+			&& teammate_target_view[0].size() == 3
+			&& teammate_target_view[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& teammate_target_view[0][1] == 2
+			&& teammate_target_view[0][2] == 0,
+		"a Duke effect targeting Serenity must serialize the exact 2 -> 0 replay view");
+	const uint32_t block_attack_mask = (1u << 0) | (1u << 1) | (1u << 3);
+	auto block_attack_targets = game.new_group();
+	field.filter_matching_card(0, 0, 0, 0, block_attack_targets, nullptr,
+		nullptr, 0, nullptr, 0, true, block_attack_mask, LOCATION_MZONE);
+	expect(block_attack_targets->container.size() == 3
+			&& block_attack_targets->container.count(serenity) == 1
+			&& block_attack_targets->container.count(tristan_board) == 1
+			&& block_attack_targets->container.count(nezbitt) == 1
+			&& block_attack_targets->container.count(duke) == 0,
+		"the anime Block Attack mask must reach both allies and Nezbitt while excluding Duke");
+	const uint32_t teammate_grave_mask = (1u << 0) | (1u << 1);
+	auto teammate_grave_targets = game.new_group();
+	field.filter_matching_card(0, 0, 0, 0, teammate_grave_targets, nullptr,
+		nullptr, 0, nullptr, 0, false, teammate_grave_mask, LOCATION_GRAVE);
+	expect(teammate_grave_targets->container.count(tristan) == 1
+			&& teammate_grave_targets->container.count(captured_tristan_card) == 1,
+		"explicit ally Graveyard scope must expose Tristan's exact owner pile");
+	auto* duke_self_aura = game.new_effect();
+	duke_self_aura->owner = duke;
+	duke_self_aura->handler = duke;
+	duke_self_aura->type = EFFECT_TYPE_FIELD;
+	duke_self_aura->s_range = LOCATION_MZONE;
+	card_set duke_self_targets;
+	field.filter_affected_cards(duke_self_aura, &duke_self_targets);
+	expect(duke_self_targets.size() == 1 && duke_self_targets.count(duke) == 1,
+		"self-range card effects must remain isolated to their exact 3v1 owner");
+	auto* duke_other_aura = game.new_effect();
+	duke_other_aura->owner = duke;
+	duke_other_aura->handler = duke;
+	duke_other_aura->type = EFFECT_TYPE_FIELD;
+	duke_other_aura->o_range = LOCATION_MZONE;
+	card_set duke_other_targets;
+	field.filter_affected_cards(duke_other_aura, &duke_other_targets);
+	expect(duke_other_targets.size() == 3
+			&& duke_other_targets.count(serenity) == 1
+			&& duke_other_targets.count(tristan_board) == 1
+			&& duke_other_targets.count(nezbitt) == 1,
+		"3v1 other-player auras must reach teammates and Nezbitt without reaching Duke");
+	auto configure_three_v_one_hopt = [](effect* peffect, card* handler) {
+		peffect->owner = handler;
+		peffect->handler = handler;
+		peffect->flag[0] = EFFECT_FLAG_COUNT_LIMIT;
+		peffect->count_limit = 1;
+		peffect->count_limit_max = 1;
+		peffect->count_code = 25880422;
+	};
+	auto* duke_hopt = game.new_effect();
+	auto* serenity_hopt = game.new_effect();
+	configure_three_v_one_hopt(duke_hopt, duke);
+	configure_three_v_one_hopt(serenity_hopt, serenity);
+	duke_hopt->dec_count(0);
+	expect(!duke_hopt->check_count_limit(0)
+			&& serenity_hopt->check_count_limit(0),
+		"once-per-player usage must never be shared between 3v1 teammates");
+	field.core.reason_effect = nullptr;
 	field.core.attacker = nezbitt;
 	field.core.attack_target_duelist = 0;
 	card_vector attack_targets;
@@ -239,6 +385,73 @@ int main() {
 	auto* direct_damage = Processors::get_opt_variant<Processors::Damage>(field.core.subunits.back());
 	expect(direct_damage && direct_damage->duelist == 2,
 		"a direct attack must queue damage for the selected allied duelist only");
+	field.core.subunits.clear();
+	field.infos.turn_player = 1;
+	field.core.attacker = nezbitt;
+	field.core.attack_target = nullptr;
+	field.core.attack_target_logical = 0;
+	field.core.attack_target_duelist = 0;
+	Processors::BattleCommand team_attack(4);
+	expect(!field.process(team_attack),
+		"Nezbitt's attack must pause for the allied Let me take it prompt");
+	auto* team_attack_prompt =
+		Processors::get_opt_variant<Processors::SelectYesNo>(field.core.subunits.back());
+	expect(team_attack_prompt && team_attack_prompt->playerid == 3,
+		"Nezbitt attacking Serenity must route Let me take it to Tristan's network seat");
+	field.returns.set<int32_t>(0, 1);
+	team_attack.step = 44;
+	expect(!field.process(team_attack)
+			&& field.core.attack_target_logical == 1
+			&& field.core.attack_target_duelist == 1,
+		"accepting the attack must redirect it to Tristan's exact logical field");
+	take_messages(game);
+	team_attack.step = 4;
+	expect(!field.process(team_attack),
+		"the redirected 3v1 attack must resume against Tristan");
+	const auto team_attack_view = take_messages(game);
+	expect(team_attack_view.size() >= 3
+			&& team_attack_view[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& team_attack_view[0][1] == 3
+			&& team_attack_view[0][2] == 1,
+		"the redirected attack replay must immediately switch from Nezbitt to Tristan");
+
+	// A replay attack is self-contained: the authoritative Nezbitt -> Duke
+	// camera is serialized immediately before MSG_ATTACK, and the packet ends
+	// with canonical logical seats. This prevents a stale Swap-the-Team view
+	// from reversing the arrow or renaming P1 as P4.
+	field.core.subunits.clear();
+	field.core.attacker = nezbitt;
+	field.core.attack_target = duke;
+	field.core.attack_target_logical = 2;
+	field.core.attack_target_duelist = 2;
+	take_messages(game);
+	Processors::BattleCommand deterministic_team_attack(8);
+	expect(!field.process(deterministic_team_attack),
+		"a 3v1 attack must emit its final replay camera and attack messages");
+	const auto deterministic_team_messages = take_messages(game);
+	auto deterministic_team_attack_message = std::find_if(
+		deterministic_team_messages.begin(), deterministic_team_messages.end(),
+		[](const auto& message) {
+			return !message.empty() && message[0] == MSG_ATTACK;
+		});
+	expect(deterministic_team_attack_message != deterministic_team_messages.end()
+			&& deterministic_team_attack_message->size() >= 23
+			&& (*deterministic_team_attack_message)
+				[deterministic_team_attack_message->size() - 2] == 3
+			&& deterministic_team_attack_message->back() == 2,
+		"Nezbitt attacking Duke must append attacker 3 and target 2 in canonical order");
+	if(deterministic_team_attack_message != deterministic_team_messages.end()) {
+		const auto attack_index = static_cast<size_t>(std::distance(
+			deterministic_team_messages.begin(), deterministic_team_attack_message));
+		expect(attack_index >= 3
+				&& deterministic_team_messages[attack_index - 3].size() == 3
+				&& deterministic_team_messages[attack_index - 3][0]
+					== MSG_MULTIPLAYER_REPLAY_VIEW
+				&& deterministic_team_messages[attack_index - 3][1] == 3
+				&& deterministic_team_messages[attack_index - 3][2] == 2,
+			"Nezbitt attacking Duke must serialize the 3 -> 2 camera immediately before MSG_ATTACK");
+	}
+
 	field.core.subunits.clear();
 	Processors::Damage effect_damage(0, nullptr, REASON_EFFECT, 1, nezbitt, 0, 700, false, 0, true);
 	expect(!field.process(effect_damage), "effect damage must pause for teammate interception");
@@ -259,6 +472,31 @@ int main() {
 	expect(!field.process(batch_damage), "non-interceptable batch damage must apply to life points");
 	expect(field.get_logical_lp(0, 0) == serenity_lp - 100,
 		"non-interceptable batch damage must affect the selected logical player");
+	field.get_logical_lp(0, 0) = 50;
+	Processors::Damage lethal_damage(0, nullptr, REASON_EFFECT, 1, nezbitt,
+		0, 1000, false, 0, false);
+	expect(!field.process(lethal_damage),
+		"lethal non-interceptable damage must complete its preparation step");
+	lethal_damage.step = 1;
+	expect(!field.process(lethal_damage) && field.get_logical_lp(0, 0) == 0,
+		"multiplayer LP must saturate at zero instead of serializing a negative value");
+	field.core.reason_effect = duke_effect;
+	expect(field.multiplayer.eliminate(0, PlayerEliminationReason::LP),
+		"Serenity must be eliminable for the persistent anime-field regression test");
+	auto after_elimination_fields = game.new_group();
+	field.filter_matching_card(0, 0, 0, 0, after_elimination_fields, nullptr,
+		nullptr, 0, nullptr, 0, false, 1u << 0, LOCATION_MZONE);
+	expect(after_elimination_fields->container.count(serenity) == 1,
+		"Serenity's remaining field card must stay targetable after her elimination");
+	take_messages(game);
+	field.publish_multiplayer_effect_view(duke_effect, serenity);
+	const auto eliminated_target_view = take_messages(game);
+	expect(eliminated_target_view.size() == 3
+			&& eliminated_target_view[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& eliminated_target_view[0][1] == 2
+			&& eliminated_target_view[0][2] == 0,
+		"an eliminated teammate's persistent card must remain focusable in replay");
+	field.core.reason_effect = nullptr;
 
 	OCG_DuelOptions royale_options = options;
 	royale_options.flags = DUEL_BATTLE_ROYALE;

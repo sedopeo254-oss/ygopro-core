@@ -455,7 +455,10 @@ public:
 	void publish_all_multiplayer_private_piles();
 	void publish_multiplayer_config();
 	void publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent);
+	void publish_multiplayer_effect_view(effect* source_effect, card* target);
 	uint8_t get_effect_duelist(uint8_t playerid) const;
+	bool matches_script_controller(const card* pcard, uint8_t requested,
+		bool previous = false) const;
 	uint8_t get_response_player(uint8_t playerid) const;
 	int32_t is_field_location_valid(uint32_t location, uint32_t sequence);
 	int32_t is_location_useable(uint32_t playerid, uint32_t location, uint32_t sequence);
@@ -507,7 +510,11 @@ public:
 	void filter_inrange_cards(effect* peffect, card_set* cset);
 	void filter_player_effect(uint8_t playerid, uint32_t code, effect_set* eset,
 		bool sort = true, uint8_t duelist = 0xff);
-	int32_t filter_matching_card(int32_t findex, uint8_t self, uint32_t location1, uint32_t location2, group* pgroup, card* pexception, group* pexgroup, uint32_t extraargs, card** pret = nullptr, int32_t fcount = 0, bool is_target = false);
+	int32_t filter_matching_card(int32_t findex, uint8_t self, uint32_t location1,
+		uint32_t location2, group* pgroup, card* pexception, group* pexgroup,
+		uint32_t extraargs, card** pret = nullptr, int32_t fcount = 0,
+		bool is_target = false, uint32_t logical_mask = 0,
+		uint32_t logical_location = 0);
 	int32_t filter_field_card(uint8_t self, uint32_t location, uint32_t location2, group* pgroup);
 	effect* is_player_affected_by_effect(uint8_t playerid, uint32_t code);
 	effect* is_logical_player_affected_by_effect(uint8_t playerid, uint8_t duelist,

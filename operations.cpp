@@ -90,6 +90,8 @@ void field::change_target(uint8_t chaincount, group* targets) {
 		for(auto& pcard : ot->container)
 			pcard->create_relation(core.current_chain[chaincount - 1]);
 		if(te->is_flag(EFFECT_FLAG_CARD_TARGET)) {
+			if(!ot->container.empty())
+				publish_multiplayer_effect_view(te, *ot->container.begin());
 			auto message = pduel->new_message(MSG_BECOME_TARGET);
 			message->write<uint32_t>(ot->container.size());
 			for(auto& pcard : ot->container) {
@@ -622,7 +624,9 @@ bool field::process(Processors::Damage& arg) {
 					arg.interceptors.push_back(logical_player);
 			if(!arg.interceptors.empty()) {
 				arg.interceptor_index = 0;
-				emplace_process<Processors::SelectYesNo>(static_cast<uint8_t>(arg.interceptors.front() + 2), MULTIPLAYER_TAKE_ATTACK_DESC);
+				emplace_process<Processors::SelectYesNo>(
+					multiplayer.prompt_player_of(arg.interceptors.front()),
+					MULTIPLAYER_TAKE_ATTACK_DESC);
 				arg.step = 19;
 				return FALSE;
 			}
@@ -654,7 +658,7 @@ bool field::process(Processors::Damage& arg) {
 			pduel->lua->add_param<LuaParam::INT>(reason_player);
 			pduel->lua->add_param<LuaParam::CARD>(reason_card);
 			if (peff->check_value_condition(5)) {
-				if(multiplayer.uses_independent_fields()) {
+				if(multiplayer.uses_logical_effect_scopes()) {
 					const auto* source = reason_card ? reason_card
 						: reason_effect ? reason_effect->get_handler() : nullptr;
 					if(source && source->current.controler < 2) {
@@ -698,15 +702,24 @@ bool field::process(Processors::Damage& arg) {
 		return FALSE;
 	}
 	case 1: {
-		if(arg.is_reflected && !multiplayer.uses_independent_fields())
+		if(arg.is_reflected && !multiplayer.uses_logical_effect_scopes())
 			playerid = 1 - playerid;
-		if(arg.is_reflected && !multiplayer.uses_independent_fields())
+		if(arg.is_reflected && !multiplayer.uses_logical_effect_scopes())
 			duelist = player[playerid].current_duelist;
 		if(arg.is_reflected || (reason & REASON_RRECOVER))
 			arg.step = 2;
 		core.hint_timing[playerid] |= TIMING_DAMAGE;
 		auto& logical_lp = get_logical_lp(playerid, duelist);
-		logical_lp -= amount;
+		if(multiplayer.enabled()) {
+			// Every multiplayer LP panel is authoritative and independent. Never
+			// serialize an underflow such as -950 into the next-turn snapshot.
+			const auto available_lp = logical_lp > 0
+				? static_cast<uint32_t>(logical_lp) : 0u;
+			logical_lp = amount >= available_lp
+				? 0 : logical_lp - static_cast<int32_t>(amount);
+		} else {
+			logical_lp -= amount;
+		}
 		auto message = pduel->new_message(MSG_DAMAGE);
 		message->write<uint8_t>(playerid);
 		message->write<uint32_t>(amount);
@@ -746,9 +759,17 @@ bool field::process(Processors::Damage& arg) {
 	case 20: {
 		if(returns.at<int32_t>(0)) {
 			const auto logical_player = arg.interceptors[arg.interceptor_index];
-			if(multiplayer.uses_independent_fields()) {
-				publish_multiplayer_replay_view(
-					multiplayer.current_player(), logical_player);
+			if(multiplayer.enabled()) {
+				const auto* source_card = reason_card ? reason_card
+					: reason_effect ? reason_effect->get_handler() : nullptr;
+				auto source_logical = source_card
+					&& source_card->current.controler < 2
+					? multiplayer.logical_player(source_card->current.controler,
+						source_card->current.duelist)
+					: multiplayer.current_player();
+				if(!multiplayer.is_active(source_logical))
+					source_logical = multiplayer.current_player();
+				publish_multiplayer_replay_view(source_logical, logical_player);
 				playerid = multiplayer.field_side_of(logical_player);
 				arg.playerid = playerid;
 			}
@@ -759,7 +780,9 @@ bool field::process(Processors::Damage& arg) {
 		}
 		++arg.interceptor_index;
 		if(arg.interceptor_index < arg.interceptors.size()) {
-			emplace_process<Processors::SelectYesNo>(static_cast<uint8_t>(arg.interceptors[arg.interceptor_index] + 2), MULTIPLAYER_TAKE_ATTACK_DESC);
+			emplace_process<Processors::SelectYesNo>(
+				multiplayer.prompt_player_of(arg.interceptors[arg.interceptor_index]),
+				MULTIPLAYER_TAKE_ATTACK_DESC);
 			arg.step = 19;
 			return FALSE;
 		}
@@ -868,7 +891,7 @@ bool field::process(Processors::PayLPCost& arg) {
 			effect* peffect = eit->second;
 			++eit;
 			const auto* handler = peffect->get_handler();
-			if(multiplayer.uses_independent_fields() && handler
+			if(multiplayer.uses_logical_effect_scopes() && handler
 					&& handler->current.controler == playerid
 					&& handler->current.duelist != duelist)
 				continue;
@@ -890,7 +913,12 @@ bool field::process(Processors::PayLPCost& arg) {
 	case 1: {
 		effect* peffect = core.select_effects[returns.at<int32_t>(0)];
 		if(!peffect) {
-			get_logical_lp(playerid, duelist) -= cost;
+			auto& logical_lp = get_logical_lp(playerid, duelist);
+			if(multiplayer.enabled())
+				logical_lp = cost >= static_cast<uint32_t>(std::max(0, logical_lp))
+					? 0 : logical_lp - static_cast<int32_t>(cost);
+			else
+				logical_lp -= cost;
 			auto message = pduel->new_message(MSG_PAY_LPCOST);
 			message->write<uint8_t>(playerid);
 			message->write<uint32_t>(cost);

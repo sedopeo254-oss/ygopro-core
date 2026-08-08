@@ -135,30 +135,6 @@ bool MultiplayerState::uses_independent_fields() const {
 		|| duel_mode == MultiplayerMode::UNIVERSAL;
 }
 
-bool MultiplayerState::uses_logical_effect_scopes() const {
-	return uses_independent_fields() || duel_mode == MultiplayerMode::THREE_V_ONE;
-}
-
-bool MultiplayerState::shares_card_effect_scope(uint8_t first, uint8_t second) const {
-	return first < configured_players && second < configured_players
-		&& first == second;
-}
-
-bool MultiplayerState::is_card_effect_player_available(uint8_t player) const {
-	return player < configured_players
-		&& (is_active(player) || duel_mode == MultiplayerMode::THREE_V_ONE);
-}
-
-bool MultiplayerState::is_other_card_effect_player(uint8_t source,
-		uint8_t target) const {
-	if(source >= configured_players || target >= configured_players
-			|| source == target || !is_card_effect_player_available(target))
-		return false;
-	if(duel_mode == MultiplayerMode::THREE_V_ONE)
-		return true;
-	return are_opponents(source, target);
-}
-
 bool MultiplayerState::are_opponents(uint8_t first, uint8_t second) const {
 	return first < configured_players && second < configured_players
 		&& first != second && teams[first] != NO_TEAM

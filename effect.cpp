@@ -134,7 +134,7 @@ int32_t effect::check_count_limit(uint8_t playerid) const {
 					return FALSE;
 			} else {
 				auto count_player = playerid;
-				if(pduel->game_field->multiplayer.uses_logical_effect_scopes()
+				if(pduel->game_field->multiplayer.uses_independent_fields()
 						&& playerid < 2) {
 					const auto* effect_handler = get_handler();
 					const auto duelist = effect_handler
@@ -462,14 +462,13 @@ int32_t effect::is_target(card* pcard) {
 		} else {
 			const auto* handler = get_handler();
 			bool same_player = pcard->current.controler == get_handler_player();
-			if(pduel->game_field->multiplayer.uses_logical_effect_scopes() && handler) {
+			if(pduel->game_field->multiplayer.uses_independent_fields() && handler) {
 				const auto handler_logical = pduel->game_field->multiplayer.logical_player(
 					handler->current.controler, handler->current.duelist);
 				const auto target_logical = pduel->game_field->multiplayer.logical_player(
 					pcard->current.controler, pcard->current.duelist);
-				same_player = pduel->game_field->multiplayer.shares_card_effect_scope(
-					handler_logical, target_logical);
-				if(!same_player && !pduel->game_field->multiplayer.is_other_card_effect_player(
+				same_player = handler_logical == target_logical;
+				if(!same_player && !pduel->game_field->multiplayer.are_opponents(
 						handler_logical, target_logical))
 					return FALSE;
 			}
@@ -506,14 +505,14 @@ int32_t effect::is_target_player(uint8_t playerid) {
 	} else {
 		const auto* handler = get_handler();
 		bool same_player = self == playerid;
-		if(pduel->game_field->multiplayer.uses_logical_effect_scopes()
+		if(pduel->game_field->multiplayer.uses_independent_fields()
 				&& handler && playerid < 2) {
 			const auto handler_logical = pduel->game_field->multiplayer.logical_player(
 				handler->current.controler, handler->current.duelist);
 			const auto target_logical = pduel->game_field->multiplayer.logical_player(
 				playerid, pduel->game_field->player[playerid].current_duelist);
 			same_player = handler_logical == target_logical;
-			if(!same_player && !pduel->game_field->multiplayer.is_other_card_effect_player(
+			if(!same_player && !pduel->game_field->multiplayer.are_opponents(
 					handler_logical, target_logical))
 				return FALSE;
 		}
@@ -625,7 +624,7 @@ void effect::dec_count(uint32_t playerid) {
 			pduel->game_field->add_effect_code(get_handler()->fieldid, count_flag, count_hopt_index, PLAYER_NONE);
 		else {
 			auto count_player = static_cast<uint8_t>(playerid);
-			if(pduel->game_field->multiplayer.uses_logical_effect_scopes()
+			if(pduel->game_field->multiplayer.uses_independent_fields()
 					&& playerid < 2) {
 				const auto* effect_handler = get_handler();
 				const auto duelist = effect_handler
@@ -652,7 +651,7 @@ void effect::inc_count(uint32_t playerid) {
 			pduel->game_field->dec_effect_code(get_handler()->fieldid, count_flag, count_hopt_index, PLAYER_NONE);
 		else {
 			auto count_player = static_cast<uint8_t>(playerid);
-			if(pduel->game_field->multiplayer.uses_logical_effect_scopes()
+			if(pduel->game_field->multiplayer.uses_independent_fields()
 					&& playerid < 2) {
 				const auto* effect_handler = get_handler();
 				const auto duelist = effect_handler

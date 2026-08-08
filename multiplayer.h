@@ -61,22 +61,6 @@ public:
 	bool allows_intrusion() const;
 	bool enabled() const;
 	bool uses_independent_fields() const;
-	// Legacy 3-vs-1 stores several independently owned fields on the same
-	// physical core side. Card queries still need a logical-player scope there,
-	// just like Battle Royale and Universal Multiplayer.
-	bool uses_logical_effect_scopes() const;
-	// "Your" cards always belong to the exact logical duelist. This remains
-	// true even when several 3-vs-1 duelists share core side 0.
-	bool shares_card_effect_scope(uint8_t first, uint8_t second) const;
-	// Eliminated 3-vs-1 duelists leave their cards on the shared anime field,
-	// so those cards remain addressable even though the duelist no longer takes
-	// turns. Other multiplayer formats expose only active logical duelists.
-	bool is_card_effect_player_available(uint8_t player) const;
-	// Returns whether a card's normal "other player" scope reaches the target.
-	// In anime 3-vs-1, legacy `1-tp` card queries reach every other logical
-	// duelist (for example Block Attack can choose a teammate or Nezbitt). Other
-	// modes keep true opponent semantics, and team/win relations stay unchanged.
-	bool is_other_card_effect_player(uint8_t source, uint8_t target) const;
 	bool are_opponents(uint8_t first, uint8_t second) const;
 	bool can_intercept(uint8_t source, uint8_t victim, uint8_t candidate) const;
 	uint8_t player_count() const;

@@ -2076,7 +2076,7 @@ bool field::process(Processors::BattleCommand& arg) {
 					arg.attack_target_duelists.push_back(duelist);
 			}
 			if(arg.attack_target_duelists.empty()) {
-				core.attack_target_logical = MultiplayerState::NO_PLAYER;
+				core.attack_target_logical = 0xff;
 				core.attack_target_duelist = 0xff;
 				arg.attack_announce_failed = true;
 				arg.step = 6;
@@ -2256,10 +2256,15 @@ bool field::process(Processors::BattleCommand& arg) {
 		else
 			core.attack_target = return_cards.list[0];
 		if(core.attack_target) {
-			if(multiplayer.uses_logical_effect_scopes()) {
+			if(multiplayer.uses_independent_fields()) {
 				core.attack_target_logical = multiplayer.logical_player(
 					core.attack_target->current.controler, core.attack_target->current.duelist);
 				core.attack_target_duelist = core.attack_target->current.duelist;
+			} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+					&& core.attack_target->current.controler == 0) {
+				core.attack_target_duelist = core.attack_target->current.duelist;
+				core.attack_target_logical = multiplayer.logical_player(
+					0, core.attack_target_duelist);
 			}
 			core.pre_field[1] = core.attack_target->fieldid_r;
 		} else
@@ -2308,14 +2313,15 @@ bool field::process(Processors::BattleCommand& arg) {
 			} else {
 				message->write(loc_info{});
 			}
-			if(multiplayer.enabled()) {
+			if(multiplayer.uses_independent_fields()) {
 				message->write<uint8_t>(multiplayer.logical_player(
 					core.attacker->current.controler, core.attacker->current.duelist));
 				message->write<uint8_t>(core.attack_target_logical);
-			}
+			} else if(multiplayer.enabled())
+				message->write<uint8_t>(core.attack_target_logical);
 			core.attack_rollback = false;
 			core.opp_mzone.clear();
-			if(multiplayer.uses_logical_effect_scopes()
+			if(multiplayer.uses_independent_fields()
 					&& multiplayer.is_active(core.attack_target_logical)) {
 				const auto target_side = multiplayer.field_side_of(core.attack_target_logical);
 				const auto target_duelist = multiplayer.duelist_index_of(core.attack_target_logical);
@@ -3145,7 +3151,7 @@ bool field::process(Processors::DamageStep& arg) {
 		} else {
 			message->write(loc_info{});
 		}
-		if(multiplayer.enabled()) {
+		if(multiplayer.uses_independent_fields()) {
 			message->write<uint8_t>(multiplayer.logical_player(
 				core.attacker->current.controler, core.attacker->current.duelist));
 			const auto target_logical = core.attack_target
@@ -3153,7 +3159,8 @@ bool field::process(Processors::DamageStep& arg) {
 					core.attack_target->current.duelist)
 				: core.attack_target_logical;
 			message->write<uint8_t>(target_logical);
-		}
+		} else if(multiplayer.enabled())
+			message->write<uint8_t>(core.attack_target_logical);
 		infos.phase = PHASE_DAMAGE;
 		(void)pduel->new_message(MSG_DAMAGE_STEP_START);
 		core.pre_field[0] = core.attacker->fieldid_r;
@@ -3626,9 +3633,8 @@ bool field::process(Processors::Turn& arg) {
 			// player, so sharing a core side never shares a hand or deck view.
 			publish_all_multiplayer_private_piles();
 			tag_swap_to(turn_player, multiplayer.duelist_index_of(logical_player));
-			// Record one stable two-player camera pair at every logical turn start.
-			// Live 3-vs-1 clients ignore this hint; replays use it to restore the
-			// exact active field and private piles instead of inheriting a stale swap.
+			// Replays receive an authoritative camera pair at the start of every
+			// logical turn. Live 3v1 clients keep the manual Swap-the-Team board.
 			for(uint8_t opponent = 0; opponent < multiplayer.player_count(); ++opponent) {
 				if(multiplayer.is_active(opponent)
 						&& multiplayer.are_opponents(logical_player, opponent)) {
@@ -5364,7 +5370,7 @@ bool field::process(Processors::Adjust& arg) {
 			if(core.attack_rollback)
 				return FALSE;
 			std::set<uint32_t> fidset;
-			if(multiplayer.uses_logical_effect_scopes()
+			if(multiplayer.uses_independent_fields()
 					&& multiplayer.is_active(core.attack_target_logical)) {
 				const auto target_side = multiplayer.field_side_of(core.attack_target_logical);
 				const auto target_duelist = multiplayer.duelist_index_of(core.attack_target_logical);

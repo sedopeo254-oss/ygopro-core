@@ -1627,16 +1627,14 @@ LUA_FUNCTION(IsPreviousPosition) {
 }
 LUA_FUNCTION(IsControler) {
 	check_param_count(L, 2);
-	const auto con = lua_get<uint8_t>(L, 2);
-	lua_pushboolean(L, pduel->game_field->matches_script_controller(
-		self, con, false));
+	auto con = lua_get<uint8_t>(L, 2);
+	lua_pushboolean(L, self->current.controler == con);
 	return 1;
 }
 LUA_FUNCTION(IsPreviousControler) {
 	check_param_count(L, 2);
-	const auto con = lua_get<uint8_t>(L, 2);
-	lua_pushboolean(L, pduel->game_field->matches_script_controller(
-		self, con, true));
+	auto con = lua_get<uint8_t>(L, 2);
+	lua_pushboolean(L, self->previous.controler == con);
 	return 1;
 }
 LUA_FUNCTION(IsOnField) {

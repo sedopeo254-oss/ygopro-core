@@ -352,7 +352,7 @@ struct processor {
 	uint8_t attack_player;
 	bool selfdes_disabled;
 	bool overdraw[2];
-	MultiplayerState::player_mask_t multiplayer_overdraw_mask{};
+	uint8_t multiplayer_overdraw_mask{};
 	int32_t check_level;
 	bool shuffle_check_disabled;
 	bool shuffle_hand_check[2];
@@ -431,8 +431,7 @@ public:
 	~field() = default;
 	void reload_field_info();
 	bool eliminate_multiplayer_player(uint8_t playerid, PlayerEliminationReason reason);
-	MultiplayerState::player_mask_t eliminate_multiplayer_players(
-		MultiplayerState::player_mask_t player_mask,
+	uint8_t eliminate_multiplayer_players(uint8_t player_mask,
 		const std::array<PlayerEliminationReason, MultiplayerState::MAX_PLAYERS>& reasons);
 
 	void add_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone = false,
@@ -453,9 +452,7 @@ public:
 	int32_t& get_logical_lp(uint8_t playerid, uint8_t duelist);
 	void publish_multiplayer_private_piles(uint8_t logical_player);
 	void publish_all_multiplayer_private_piles();
-	void publish_multiplayer_config();
 	void publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent);
-	void publish_multiplayer_effect_view(effect* source_effect, card* target);
 	uint8_t get_effect_duelist(uint8_t playerid) const;
 	uint8_t get_response_player(uint8_t playerid) const;
 	int32_t is_field_location_valid(uint32_t location, uint32_t sequence);
@@ -508,15 +505,9 @@ public:
 	void filter_inrange_cards(effect* peffect, card_set* cset);
 	void filter_player_effect(uint8_t playerid, uint32_t code, effect_set* eset,
 		bool sort = true, uint8_t duelist = 0xff);
-	int32_t filter_matching_card(int32_t findex, uint8_t self, uint32_t location1,
-		uint32_t location2, group* pgroup, card* pexception, group* pexgroup,
-		uint32_t extraargs, card** pret = nullptr, int32_t fcount = 0,
-		bool is_target = false, uint32_t logical_mask = 0,
-		uint32_t logical_location = 0);
+	int32_t filter_matching_card(int32_t findex, uint8_t self, uint32_t location1, uint32_t location2, group* pgroup, card* pexception, group* pexgroup, uint32_t extraargs, card** pret = nullptr, int32_t fcount = 0, bool is_target = false);
 	int32_t filter_field_card(uint8_t self, uint32_t location, uint32_t location2, group* pgroup);
 	effect* is_player_affected_by_effect(uint8_t playerid, uint32_t code);
-	effect* is_logical_player_affected_by_effect(uint8_t playerid, uint8_t duelist,
-		uint32_t code);
 	void get_player_effect(uint8_t playerid, uint32_t code, effect_set* eset);
 
 	int32_t get_release_list(uint8_t playerid, card_set* release_list, card_set* ex_list, card_set* ex_list_oneof, int32_t use_hand, int32_t fun, int32_t exarg, card* exc, group* exg, bool use_oppo, uint32_t reason);
@@ -563,7 +554,7 @@ public:
 	static int32_t check_with_sum_greater_limit(const card_vector& mats, int32_t acc, int32_t index, int32_t opmin, int32_t* should_continue);
 	static int32_t check_with_sum_greater_limit_m(const card_vector& mats, int32_t acc, int32_t index, int32_t opmin, int32_t must_count, int32_t* should_continue);
 
-	int32_t is_player_can_draw(uint8_t playerid, uint8_t duelist = 0xff);
+	int32_t is_player_can_draw(uint8_t playerid);
 	int32_t is_player_can_discard_deck(uint8_t playerid, uint32_t count);
 	int32_t is_player_can_discard_deck_as_cost(uint8_t playerid, uint32_t count);
 	int32_t is_player_can_discard_hand(uint8_t playerid, card* pcard, effect* peffect, uint32_t reason);

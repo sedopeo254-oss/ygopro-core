@@ -13,14 +13,7 @@
 enum class MultiplayerMode : uint8_t {
 	NONE = 0,
 	BATTLE_ROYALE,
-	THREE_V_ONE,
-	UNIVERSAL
-};
-
-enum class UniversalMultiplayerFormat : uint8_t {
-	SOLO = 0,
-	TEAMS,
-	BATTLE_ROYALE
+	THREE_V_ONE
 };
 
 enum class PlayerEliminationReason : uint8_t {
@@ -32,39 +25,16 @@ enum class PlayerEliminationReason : uint8_t {
 
 class MultiplayerState {
 public:
-	using player_mask_t = uint32_t;
-	static constexpr uint8_t MAX_PLAYERS = 26;
-	static constexpr uint8_t MAX_PLAYERS_PER_SIDE = 13;
-	static constexpr uint8_t MAX_TEAMS = 26;
+	static constexpr uint8_t MAX_PLAYERS = 4;
 	static constexpr uint8_t NO_PLAYER = 0xff;
 	static constexpr uint8_t NO_TEAM = 0xff;
 
-	struct UniversalConfig {
-		uint8_t side_one_players{ 1 };
-		uint8_t side_two_players{ 1 };
-		UniversalMultiplayerFormat format{ UniversalMultiplayerFormat::SOLO };
-		bool arc_v_first_turn_rules{ false };
-		bool allow_intrusion{ false };
-		// Zero means every configured seat starts active. A non-zero mask can
-		// reserve inactive seats for players that intrude into an ongoing Duel.
-		player_mask_t initial_active_mask{ 0 };
-		std::array<uint8_t, MAX_PLAYERS> teams{};
-	};
-
 	void configure(MultiplayerMode new_mode);
-	bool configure_universal(const UniversalConfig& config);
 	void reset();
 
 	MultiplayerMode mode() const;
-	UniversalMultiplayerFormat universal_format() const;
-	bool uses_arc_v_first_turn_rules() const;
-	bool allows_intrusion() const;
 	bool enabled() const;
-	bool uses_independent_fields() const;
-	bool are_opponents(uint8_t first, uint8_t second) const;
-	bool can_intercept(uint8_t source, uint8_t victim, uint8_t candidate) const;
-	uint8_t player_count() const;
-	player_mask_t active_mask() const;
+	uint8_t active_mask() const;
 	uint8_t active_count() const;
 	bool is_active(uint8_t player) const;
 	uint8_t team_of(uint8_t player) const;
@@ -79,15 +49,9 @@ public:
 	uint8_t current_player() const;
 	uint8_t advance_turn();
 	uint8_t next_active_player(uint8_t player) const;
-	bool complete_turn(uint8_t player);
-	bool can_attack_on_current_turn(uint8_t player) const;
-	bool can_draw_on_current_turn(uint8_t player) const;
-	bool activate_intruder(uint8_t player);
-	bool is_intruder(uint8_t player) const;
-	uint32_t starting_lp_for(uint8_t player, uint32_t normal_starting_lp) const;
 
 	bool eliminate(uint8_t player, PlayerEliminationReason reason);
-	player_mask_t eliminate_many(player_mask_t player_mask,
+	uint8_t eliminate_many(uint8_t player_mask,
 		const std::array<PlayerEliminationReason, MAX_PLAYERS>& player_reasons);
 	PlayerEliminationReason elimination_reason(uint8_t player) const;
 
@@ -98,24 +62,20 @@ public:
 	uint8_t winner_team() const;
 
 private:
-	static uint8_t count_bits(player_mask_t value);
-	static player_mask_t mask_for_players(uint8_t count);
-	player_mask_t active_teams_mask() const;
+	static uint8_t count_bits(uint8_t value);
+	uint8_t active_teams_mask() const;
 	void update_winner();
-	void configure_turn_order();
 
 	MultiplayerMode duel_mode{ MultiplayerMode::NONE };
-	UniversalMultiplayerFormat universal_duel_format{ UniversalMultiplayerFormat::SOLO };
-	player_mask_t players_mask{ 0 };
-	player_mask_t completed_first_turn_mask{ 0 };
-	player_mask_t intrusion_mask{ 0 };
-	std::array<uint8_t, MAX_PLAYERS> teams{};
-	std::array<uint8_t, MAX_PLAYERS> turn_order{};
-	std::array<PlayerEliminationReason, MAX_PLAYERS> reasons{};
-	uint8_t configured_players{ 0 };
-	uint8_t players_on_side[2]{ 0, 0 };
-	bool arc_v_rules{ false };
-	bool intrusion_enabled{ false };
+	uint8_t players_mask{ 0 };
+	std::array<uint8_t, MAX_PLAYERS> teams{ NO_TEAM, NO_TEAM, NO_TEAM, NO_TEAM };
+	std::array<uint8_t, MAX_PLAYERS> turn_order{ 0, 1, 2, 3 };
+	std::array<PlayerEliminationReason, MAX_PLAYERS> reasons{
+		PlayerEliminationReason::LP,
+		PlayerEliminationReason::LP,
+		PlayerEliminationReason::LP,
+		PlayerEliminationReason::LP
+	};
 	uint8_t winning_player{ NO_PLAYER };
 	uint8_t winning_team{ NO_TEAM };
 	uint8_t turn_player{ NO_PLAYER };

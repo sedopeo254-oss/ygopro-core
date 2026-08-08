@@ -168,24 +168,14 @@ uint32_t OCG_DuelEliminatePlayer(OCG_Duel ocg_duel, uint8_t player, uint8_t reas
 		status |= OCG_MULTIPLAYER_ELIMINATION_FINISHED;
 		uint8_t winner = PLAYER_NONE;
 		if(game_field.multiplayer.has_winner()) {
-			if(game_field.multiplayer.mode() == MultiplayerMode::THREE_V_ONE)
-				winner = game_field.multiplayer.winner_team();
-			else if(game_field.multiplayer.mode() != MultiplayerMode::UNIVERSAL
-					|| game_field.multiplayer.universal_format()
-						!= UniversalMultiplayerFormat::TEAMS)
-				winner = game_field.multiplayer.field_side_of(
-					game_field.multiplayer.winner_player());
+			winner = game_field.multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+				? game_field.multiplayer.winner_team()
+				: game_field.multiplayer.field_side_of(game_field.multiplayer.winner_player());
 		}
 		auto message = pduel->new_message(MSG_WIN);
 		message->write<uint8_t>(winner);
 		message->write<uint8_t>(reason == static_cast<uint8_t>(PlayerEliminationReason::LP) ? 1
 			: (reason == static_cast<uint8_t>(PlayerEliminationReason::DECK) ? 2 : 0));
-		if(game_field.multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE)
-			message->write<uint8_t>(game_field.multiplayer.winner_player());
-		else if(game_field.multiplayer.mode() == MultiplayerMode::UNIVERSAL) {
-			message->write<uint8_t>(game_field.multiplayer.winner_player());
-			message->write<uint8_t>(game_field.multiplayer.winner_team());
-		}
 		game_field.core.win_player = 5;
 		game_field.core.win_reason = 0;
 	} else if(was_current_player) {

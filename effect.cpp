@@ -134,7 +134,7 @@ int32_t effect::check_count_limit(uint8_t playerid) const {
 					return FALSE;
 			} else {
 				auto count_player = playerid;
-				if(pduel->game_field->multiplayer.uses_independent_fields()
+				if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
 						&& playerid < 2) {
 					const auto* effect_handler = get_handler();
 					const auto duelist = effect_handler
@@ -461,17 +461,11 @@ int32_t effect::is_target(card* pcard) {
 			}
 		} else {
 			const auto* handler = get_handler();
-			bool same_player = pcard->current.controler == get_handler_player();
-			if(pduel->game_field->multiplayer.uses_independent_fields() && handler) {
-				const auto handler_logical = pduel->game_field->multiplayer.logical_player(
-					handler->current.controler, handler->current.duelist);
-				const auto target_logical = pduel->game_field->multiplayer.logical_player(
-					pcard->current.controler, pcard->current.duelist);
-				same_player = handler_logical == target_logical;
-				if(!same_player && !pduel->game_field->multiplayer.are_opponents(
-						handler_logical, target_logical))
-					return FALSE;
-			}
+			const bool same_player = pduel->game_field->multiplayer.mode()
+					== MultiplayerMode::BATTLE_ROYALE && handler
+				? pcard->current.controler == handler->current.controler
+					&& pcard->current.duelist == handler->current.duelist
+				: pcard->current.controler == get_handler_player();
 			if(same_player) {
 				if(!pcard->current.is_location(s_range))
 					return FALSE;
@@ -504,18 +498,12 @@ int32_t effect::is_target_player(uint8_t playerid) {
 			return TRUE;
 	} else {
 		const auto* handler = get_handler();
-		bool same_player = self == playerid;
-		if(pduel->game_field->multiplayer.uses_independent_fields()
-				&& handler && playerid < 2) {
-			const auto handler_logical = pduel->game_field->multiplayer.logical_player(
-				handler->current.controler, handler->current.duelist);
-			const auto target_logical = pduel->game_field->multiplayer.logical_player(
-				playerid, pduel->game_field->player[playerid].current_duelist);
-			same_player = handler_logical == target_logical;
-			if(!same_player && !pduel->game_field->multiplayer.are_opponents(
-					handler_logical, target_logical))
-				return FALSE;
-		}
+		const bool same_player = pduel->game_field->multiplayer.mode()
+				== MultiplayerMode::BATTLE_ROYALE && handler && playerid < 2
+			? handler->current.controler == playerid
+				&& handler->current.duelist
+					== pduel->game_field->player[playerid].current_duelist
+			: self == playerid;
 		if(s_range && same_player)
 			return TRUE;
 		if(o_range && !same_player)
@@ -624,7 +612,7 @@ void effect::dec_count(uint32_t playerid) {
 			pduel->game_field->add_effect_code(get_handler()->fieldid, count_flag, count_hopt_index, PLAYER_NONE);
 		else {
 			auto count_player = static_cast<uint8_t>(playerid);
-			if(pduel->game_field->multiplayer.uses_independent_fields()
+			if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
 					&& playerid < 2) {
 				const auto* effect_handler = get_handler();
 				const auto duelist = effect_handler
@@ -651,7 +639,7 @@ void effect::inc_count(uint32_t playerid) {
 			pduel->game_field->dec_effect_code(get_handler()->fieldid, count_flag, count_hopt_index, PLAYER_NONE);
 		else {
 			auto count_player = static_cast<uint8_t>(playerid);
-			if(pduel->game_field->multiplayer.uses_independent_fields()
+			if(pduel->game_field->multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
 					&& playerid < 2) {
 				const auto* effect_handler = get_handler();
 				const auto duelist = effect_handler

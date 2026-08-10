@@ -70,6 +70,30 @@ typedef struct OCG_Player {
 	uint32_t drawCountPerTurn;
 }OCG_Player;
 
+#define OCG_MULTIPLAYER_MAX_PLAYERS 26
+#define OCG_MULTIPLAYER_MAX_SIDE_PLAYERS 13
+#define OCG_MULTIPLAYER_MAX_TEAMS OCG_MULTIPLAYER_MAX_PLAYERS
+
+typedef enum OCG_UniversalMultiplayerFormat {
+	OCG_MULTIPLAYER_FORMAT_SOLO = 0,
+	OCG_MULTIPLAYER_FORMAT_TEAMS = 1,
+	OCG_MULTIPLAYER_FORMAT_BATTLE_ROYALE = 2
+}OCG_UniversalMultiplayerFormat;
+
+typedef enum OCG_UniversalMultiplayerFlags {
+	OCG_MULTIPLAYER_ARC_V_FIRST_TURN = 0x1,
+	OCG_MULTIPLAYER_ALLOW_INTRUSION = 0x2
+}OCG_UniversalMultiplayerFlags;
+
+typedef struct OCG_UniversalMultiplayerOptions {
+	uint8_t side1_players;
+	uint8_t side2_players;
+	uint8_t format;
+	uint8_t flags;
+	uint32_t initial_active_mask;
+	uint8_t teams[OCG_MULTIPLAYER_MAX_PLAYERS];
+}OCG_UniversalMultiplayerOptions;
+
 typedef void (*OCG_DataReader)(void* payload, uint32_t code, OCG_CardData* data);
 typedef void (*OCG_DataReaderDone)(void* payload, OCG_CardData* data);
 typedef int (*OCG_ScriptReader)(void* payload, OCG_Duel duel, const char* name);
@@ -89,6 +113,7 @@ typedef struct OCG_DuelOptions {
 	OCG_DataReaderDone cardReaderDone;
 	void* payload4; /* relayed to cardReaderDone */
 	uint8_t enableUnsafeLibraries;
+	OCG_UniversalMultiplayerOptions multiplayer;
 }OCG_DuelOptions;
 
 typedef struct OCG_NewCardInfo {

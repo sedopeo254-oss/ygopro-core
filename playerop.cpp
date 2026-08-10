@@ -339,6 +339,7 @@ bool field::process(Processors::SelectCardCodes& arg) {
 	auto playerid = arg.playerid;
 	const auto selecting_player = get_response_player(playerid);
 	auto display_playerid = arg.display_playerid;
+	auto display_duelist = arg.display_duelist;
 	auto cancelable = arg.cancelable;
 	auto min = arg.min;
 	auto max = arg.max;
@@ -372,7 +373,7 @@ bool field::process(Processors::SelectCardCodes& arg) {
 		message->write<uint32_t>((uint32_t)core.select_cards_codes.size());
 		for(const auto& obj : core.select_cards_codes) {
 			message->write<uint32_t>(obj.first);
-			message->write(loc_info{ display_playerid, 0, 0, 0, 0 });
+			message->write(loc_info{ display_playerid, 0, display_duelist, 0, 0 });
 		}
 		return FALSE;
 	} else {
@@ -464,7 +465,7 @@ bool field::process(Processors::SelectChain& arg) {
 	auto forced = arg.forced;
 	const bool split_logical_prompt = !forced
 		&& ((multiplayer.mode() == MultiplayerMode::THREE_V_ONE && playerid == 0)
-			|| multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE);
+			|| multiplayer.uses_independent_fields());
 	auto write_chain = [&](auto* out_message, size_t chain_index) {
 		const auto& ch = *std::next(core.select_chains.begin(), static_cast<ptrdiff_t>(chain_index));
 		effect* peffect = ch.triggering_effect;

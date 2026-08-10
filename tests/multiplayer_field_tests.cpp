@@ -4,6 +4,7 @@
 #include "field.h"
 #include "ocgapi.h"
 
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
@@ -66,6 +67,14 @@ std::vector<std::vector<uint8_t>> take_messages(duel& game) {
 	game.clear_buffer();
 	return messages;
 }
+
+uint32_t read_u32(const std::vector<uint8_t>& message, size_t offset) {
+	expect(offset + sizeof(uint32_t) <= message.size(),
+		"the message must contain the requested uint32 value");
+	uint32_t value = 0;
+	std::memcpy(&value, message.data() + offset, sizeof(value));
+	return value;
+}
 }
 
 int main() {
@@ -121,6 +130,33 @@ int main() {
 	field.core.reason_effect = nullptr;
 	expect(field.get_response_player(0) == 4,
 		"the current allied field must remain the response fallback without an effect handler");
+
+	// Virtual World selects a Deck Master from a code-only list. These cards
+	// have no field location, so their synthetic location must still identify
+	// the exact logical duelist. Otherwise the server's private-card filter
+	// exposes player 1's choices but replaces players 2 and 3 with card backs.
+	const std::array<uint8_t, 4> deck_master_selectors{ 2, 3, 4, 1 };
+	const std::array<uint8_t, 4> deck_master_sides{ 0, 0, 0, 1 };
+	const std::array<uint8_t, 4> deck_master_duelists{ 0, 1, 2, 0 };
+	take_messages(game);
+	for(uint8_t logical = 0; logical < 4; ++logical) {
+		field.core.select_cards_codes = { { 9000u + logical, 1u } };
+		Processors::SelectCardCodes deck_master_select(
+			0, deck_master_selectors[logical], false, 1, 1,
+			deck_master_sides[logical], deck_master_duelists[logical]);
+		expect(!field.process(deck_master_select),
+			"a Deck Master code selection must wait for its logical player");
+		const auto deck_master_messages = take_messages(game);
+		expect(deck_master_messages.size() == 1,
+			"a Deck Master code selection must emit exactly one prompt");
+		const auto& prompt = deck_master_messages.front();
+		expect(prompt.size() == 29 && prompt[0] == MSG_SELECT_CARD
+				&& prompt[1] == deck_master_selectors[logical]
+				&& read_u32(prompt, 15) == 9000u + logical
+				&& prompt[19] == deck_master_sides[logical]
+				&& (read_u32(prompt, 25) >> 24) == deck_master_duelists[logical],
+			"every 3v1 player must receive face-up Deck Master choices tagged with their own logical seat");
+	}
 
 	auto* tristan_hand = game.new_card(2003);
 	tristan_hand->owner = 0;
@@ -186,6 +222,51 @@ int main() {
 	auto* nezbitt = game.new_card(3000);
 	nezbitt->owner = 1;
 	field.add_card(1, nezbitt, LOCATION_MZONE, 0);
+
+	// Anime 3v1 card scripts opt in to exact logical-player targeting instead
+	// of globally redefining tp/1-tp for every existing card script.
+	auto* tristan_target = game.new_card(3001);
+	tristan_target->owner = 0;
+	tristan_target->owner_duelist = 1;
+	field.add_card(0, tristan_target, LOCATION_MZONE, 1, false, 1);
+	auto logical_targets = game.new_group();
+	const uint32_t everyone_except_serenity = 0x0eu;
+	field.filter_matching_card(0, 0, 0, 0, logical_targets, nullptr, nullptr,
+		0, nullptr, 0, false, everyone_except_serenity, LOCATION_MZONE);
+	expect(logical_targets->container.size() == 3
+			&& logical_targets->has_card(tristan_target)
+			&& logical_targets->has_card(duke)
+			&& logical_targets->has_card(nezbitt)
+			&& !logical_targets->has_card(serenity),
+		"an explicit logical target mask must include the selected teammate and opponent fields only");
+
+	// A temporarily controlled card must return to the original owner's exact
+	// Graveyard rather than the active field's or controller's Graveyard.
+	auto* controlled_tristan = game.new_card(3002);
+	controlled_tristan->owner = 0;
+	controlled_tristan->owner_duelist = 1;
+	field.add_card(1, controlled_tristan, LOCATION_MZONE, 1);
+	expect(field.move_card(1, controlled_tristan, LOCATION_GRAVE, 0),
+		"a temporarily controlled teammate card must be movable to the Graveyard");
+	expect(field.get_logical_list(0, LOCATION_GRAVE, 1).back() == controlled_tristan,
+		"the controlled card must appear in Tristan's own Graveyard");
+
+	// 3v1 replays need the same authoritative player-pair packet and private
+	// pile snapshots already used by Battle Royale.
+	take_messages(game);
+	field.publish_multiplayer_replay_view(3, 1);
+	const auto three_v_one_view = take_messages(game);
+	expect(three_v_one_view.size() == 3
+			&& three_v_one_view[0].size() == 3
+			&& three_v_one_view[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& three_v_one_view[0][1] == 3
+			&& three_v_one_view[0][2] == 1
+			&& three_v_one_view[1][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& three_v_one_view[1][1] == 3
+			&& three_v_one_view[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& three_v_one_view[2][1] == 1,
+		"a 3v1 replay view must carry the exact player pair and both pile snapshots");
+
 	field.core.attacker = nezbitt;
 	field.core.attack_target_duelist = 0;
 	card_vector attack_targets;
@@ -223,6 +304,40 @@ int main() {
 	expect(!field.process(batch_damage), "non-interceptable batch damage must apply to life points");
 	expect(field.get_logical_lp(0, 0) == serenity_lp - 100,
 		"non-interceptable batch damage must affect the selected logical player");
+
+	field.get_logical_lp(0, 0) = 50;
+	Processors::Damage fatal_damage(0, nullptr, REASON_EFFECT, 1, nezbitt,
+		0, 1000, false, 0, false);
+	expect(!field.process(fatal_damage),
+		"fatal damage must complete its first non-interceptable processing step");
+	fatal_damage.step = 1;
+	expect(!field.process(fatal_damage)
+			&& field.get_logical_lp(0, 0) == 0,
+		"fatal multiplayer damage must clamp the victim's LP at zero");
+
+	// Reproduce Nezbitt choosing P2 through the player menu. The selected
+	// logical identity must be stored before teammate interception is offered.
+	field.core.subunits.clear();
+	field.infos.turn_player = 1;
+	field.core.attacker = nezbitt;
+	Processors::BattleCommand three_v_one_attack(4);
+	three_v_one_attack.attack_target_duelists = { 0, 1, 2 };
+	field.returns.set<int32_t>(0, 1);
+	expect(!field.process(three_v_one_attack)
+			&& field.core.attack_target_logical == 1
+			&& field.core.attack_target_duelist == 1,
+		"choosing P2 must preserve P2's logical identity and field index");
+	auto* attack_intercept_prompt =
+		Processors::get_opt_variant<Processors::SelectYesNo>(field.core.subunits.back());
+	expect(attack_intercept_prompt
+			&& attack_intercept_prompt->playerid == field.multiplayer.prompt_player_of(0),
+		"Let me take it must be shown to P2's first eligible teammate");
+	field.returns.set<int32_t>(0, 1);
+	three_v_one_attack.step = 44;
+	expect(!field.process(three_v_one_attack)
+			&& field.core.attack_target_logical == 0
+			&& field.core.attack_target_duelist == 0,
+		"accepting Let me take it must redirect the attack to the accepting teammate");
 
 	OCG_DuelOptions royale_options = options;
 	royale_options.flags = DUEL_BATTLE_ROYALE;
@@ -361,6 +476,47 @@ int main() {
 			&& attack_intercept_view_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
 			&& attack_intercept_view_messages[2][1] == 1,
 		"the redirected attack replay view must include both complete private-pile snapshots");
+	// The final attack message must carry an adjacent authoritative view pair.
+	// This is what prevents a replay seek from briefly drawing the arrow from
+	// the target's stale field transform back toward the attacker.
+	royale_field.core.subunits.clear();
+	royale_field.core.attacker = kaiba;
+	royale_field.core.attack_target = marik;
+	royale_field.core.attack_target_logical = 2;
+	royale_field.core.attack_target_duelist = 0;
+	take_messages(royale);
+	Processors::BattleCommand deterministic_replay_attack(8);
+	expect(!royale_field.process(deterministic_replay_attack),
+		"a Battle Royale attack must emit its final replay camera and attack messages");
+	const auto deterministic_attack_messages = take_messages(royale);
+	auto attack_message = std::find_if(deterministic_attack_messages.begin(),
+		deterministic_attack_messages.end(), [](const auto& message) {
+			return !message.empty() && message[0] == MSG_ATTACK;
+		});
+	expect(attack_message != deterministic_attack_messages.end()
+			&& std::distance(deterministic_attack_messages.begin(), attack_message) >= 3,
+		"the final Battle Royale attack must be preceded by a replay-view snapshot pair");
+	if(attack_message != deterministic_attack_messages.end()
+			&& std::distance(deterministic_attack_messages.begin(), attack_message) >= 3) {
+		const auto attack_index = static_cast<size_t>(std::distance(
+			deterministic_attack_messages.begin(), attack_message));
+		expect(deterministic_attack_messages[attack_index - 3].size() == 3
+				&& deterministic_attack_messages[attack_index - 3][0]
+					== MSG_MULTIPLAYER_REPLAY_VIEW
+				&& deterministic_attack_messages[attack_index - 3][1] == 0
+				&& deterministic_attack_messages[attack_index - 3][2] == 2
+				&& deterministic_attack_messages[attack_index - 2][0]
+					== MSG_MULTIPLAYER_PRIVATE_PILES
+				&& deterministic_attack_messages[attack_index - 2][1] == 0
+				&& deterministic_attack_messages[attack_index - 1][0]
+					== MSG_MULTIPLAYER_PRIVATE_PILES
+				&& deterministic_attack_messages[attack_index - 1][1] == 2,
+			"P1 attacking P3 must serialize the P1 -> P3 camera immediately before MSG_ATTACK");
+		expect(attack_message->size() >= 23
+				&& (*attack_message)[attack_message->size() - 2] == 0
+				&& (*attack_message)[attack_message->size() - 1] == 2,
+			"P1 attacking P3 must append attacker 0 and target 2 in that order");
+	}
 	royale_field.core.subunits.clear();
 	Processors::Damage royale_effect_damage(
 		0, nullptr, REASON_EFFECT, 0, kaiba, 1, 600, false, 0, true);
@@ -475,6 +631,204 @@ int main() {
 	expect(opposing_matching_group->container.size() == 3,
 		"Battle Royale matching groups must expose every legal opposing field");
 	royale_field.core.reason_effect = nullptr;
+
+	OCG_DuelOptions universal_options = options;
+	universal_options.flags = DUEL_UNIVERSAL_MULTIPLAYER;
+	universal_options.multiplayer.side1_players = 13;
+	universal_options.multiplayer.side2_players = 13;
+	universal_options.multiplayer.format = OCG_MULTIPLAYER_FORMAT_SOLO;
+	duel universal(universal_options, valid_lua);
+	expect(valid_lua, "the 26-player universal Duel must initialize");
+	auto& universal_field = *universal.game_field;
+	expect(universal_field.multiplayer.mode() == MultiplayerMode::UNIVERSAL
+			&& universal_field.multiplayer.player_count() == 26,
+		"the universal options must reach the core field");
+	const auto first_player_lp = universal_field.get_logical_lp(0, 0);
+	universal_field.get_logical_lp(0, 1) = first_player_lp - 500;
+	expect(universal_field.get_logical_lp(0, 0) == first_player_lp
+			&& universal_field.get_logical_lp(0, 1) == first_player_lp - 500,
+		"an empty logical Deck must still receive independent life points");
+	universal_field.get_logical_lp(0, 1) = first_player_lp;
+	expect(&universal_field.get_logical_list(0, LOCATION_HAND, 0)
+			!= &universal_field.get_logical_list(0, LOCATION_HAND, 1),
+		"an empty logical Deck must still own an independent private resource set");
+	expect(universal_field.player[0].list_mzone.size() == 91
+			&& universal_field.player[1].list_mzone.size() == 91
+			&& universal_field.player[0].list_szone.size() == 104
+			&& universal_field.player[1].list_szone.size() == 104,
+		"13 independent monster and spell/trap fields must exist on each core side");
+	auto initialize_universal_duelist = [&](uint8_t side, uint8_t duelist, uint32_t code) {
+		const OCG_NewCardInfo info{
+			side,
+			duelist,
+			code,
+			side,
+			LOCATION_DECK,
+			0,
+			POS_FACEDOWN_DEFENSE
+		};
+		OCG_DuelNewCard(&universal, &info);
+	};
+	initialize_universal_duelist(0, 12, 5000);
+	initialize_universal_duelist(1, 12, 5001);
+	expect(universal_field.tag_swap_to(0, 12) && universal_field.tag_swap_to(1, 12),
+		"the thirteenth private resource set on both sides must be selectable");
+	auto* side_one_final = universal.new_card(5002);
+	side_one_final->owner = 0;
+	side_one_final->owner_duelist = 12;
+	universal_field.add_card(0, side_one_final, LOCATION_MZONE, 6, false, 12);
+	auto* side_two_final = universal.new_card(5003);
+	side_two_final->owner = 1;
+	side_two_final->owner_duelist = 12;
+	universal_field.add_card(1, side_two_final, LOCATION_SZONE, 7, false, 12);
+	expect(side_one_final->current.sequence == 90
+			&& side_two_final->current.sequence == 103,
+		"the final universal fields must keep globally unique internal zone sequences");
+	take_messages(universal);
+	universal_field.publish_all_multiplayer_private_piles();
+	const auto universal_private_messages = take_messages(universal);
+	expect(universal_private_messages.size() == 26,
+		"the core must publish one independent private-pile snapshot for every universal player");
+	for(uint8_t logical = 0; logical < 26; ++logical) {
+		expect(universal_private_messages[logical].size() >= 2
+				&& universal_private_messages[logical][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+				&& universal_private_messages[logical][1] == logical,
+			"private-pile snapshots must retain their unique logical-player route");
+	}
+
+	OCG_DuelOptions universal_team_options = options;
+	universal_team_options.flags = DUEL_UNIVERSAL_MULTIPLAYER;
+	universal_team_options.multiplayer.side1_players = 2;
+	universal_team_options.multiplayer.side2_players = 2;
+	universal_team_options.multiplayer.format = OCG_MULTIPLAYER_FORMAT_TEAMS;
+	// Logical players 0 and 2 are allies even though they use opposite core
+	// sides. Players 1 and 3 form the other team.
+	universal_team_options.multiplayer.teams[0] = 0;
+	universal_team_options.multiplayer.teams[1] = 1;
+	universal_team_options.multiplayer.teams[2] = 0;
+	universal_team_options.multiplayer.teams[3] = 1;
+	bool universal_team_valid_lua = true;
+	duel universal_team(universal_team_options, universal_team_valid_lua);
+	expect(universal_team_valid_lua, "the Universal Teams Lua runtime must initialize");
+	auto& universal_team_field = *universal_team.game_field;
+	initialize_extra_duelist(universal_team, 1, 6001);
+	const OCG_NewCardInfo universal_team_side_two_extra{
+		1,
+		1,
+		6003,
+		1,
+		LOCATION_DECK,
+		0,
+		POS_FACEDOWN_DEFENSE
+	};
+	OCG_DuelNewCard(&universal_team, &universal_team_side_two_extra);
+	auto add_universal_team_monster = [&](uint8_t side, uint8_t duelist, uint32_t code) {
+		auto* monster = universal_team.new_card(code);
+		monster->owner = side;
+		monster->owner_duelist = duelist;
+		monster->current.position = POS_FACEUP_ATTACK;
+		universal_team_field.add_card(side, monster, LOCATION_MZONE, 0, false, duelist);
+		return monster;
+	};
+	auto* team_zero_player_zero = add_universal_team_monster(0, 0, 6100);
+	auto* team_one_player_one = add_universal_team_monster(0, 1, 6101);
+	auto* team_zero_player_two = add_universal_team_monster(1, 0, 6102);
+	auto* team_one_player_three = add_universal_team_monster(1, 1, 6103);
+	expect(team_zero_player_zero->current.sequence == 0
+			&& team_one_player_one->current.sequence == 7
+			&& team_zero_player_two->current.sequence == 0
+			&& team_one_player_three->current.sequence == 7,
+		"Universal Teams must preserve every teammate's independent field");
+	auto* team_zero_opponent_aura = universal_team.new_effect();
+	team_zero_opponent_aura->owner = team_zero_player_zero;
+	team_zero_opponent_aura->handler = team_zero_player_zero;
+	team_zero_opponent_aura->type = EFFECT_TYPE_FIELD;
+	team_zero_opponent_aura->o_range = LOCATION_MZONE;
+	card_set universal_team_opponents;
+	universal_team_field.filter_affected_cards(team_zero_opponent_aura,
+		&universal_team_opponents);
+	expect(universal_team_opponents.size() == 2
+			&& universal_team_opponents.count(team_one_player_one) == 1
+			&& universal_team_opponents.count(team_one_player_three) == 1
+			&& universal_team_opponents.count(team_zero_player_two) == 0,
+		"opponent-range effects in Universal Teams must exclude allies on either core side");
+	universal_team_field.core.attacker = team_zero_player_zero;
+	universal_team_field.core.attack_target_logical = 2;
+	card_vector universal_team_targets;
+	universal_team_field.get_attack_target(team_zero_player_zero, &universal_team_targets);
+	expect(universal_team_targets.empty(),
+		"a Universal Teams player must not be allowed to attack a cross-side ally");
+	universal_team_field.core.attack_target_logical = 3;
+	universal_team_targets.clear();
+	universal_team_field.get_attack_target(team_zero_player_zero, &universal_team_targets);
+	expect(universal_team_targets.size() == 1
+			&& universal_team_targets.front() == team_one_player_three,
+		"a Universal Teams attack must project the selected enemy's independent field");
+	auto* team_zero_lp_protection = universal_team.new_effect();
+	team_zero_player_zero->set_status(STATUS_EFFECT_ENABLED, TRUE);
+	team_zero_lp_protection->owner = team_zero_player_zero;
+	team_zero_lp_protection->type = EFFECT_TYPE_FIELD;
+	team_zero_lp_protection->code = EFFECT_CANNOT_LOSE_LP;
+	team_zero_lp_protection->flag[0] = EFFECT_FLAG_PLAYER_TARGET;
+	team_zero_lp_protection->range = LOCATION_MZONE;
+	team_zero_lp_protection->s_range = 1;
+	team_zero_player_zero->add_effect(team_zero_lp_protection);
+	expect(universal_team_field.is_logical_player_affected_by_effect(0, 0,
+			EFFECT_CANNOT_LOSE_LP) == team_zero_lp_protection,
+		"player protection must apply to the exact logical player that owns it");
+	expect(!universal_team_field.is_logical_player_affected_by_effect(0, 1,
+			EFFECT_CANNOT_LOSE_LP),
+		"player protection must not leak to another player on the same core side");
+	expect(!universal_team_field.is_logical_player_affected_by_effect(1, 0,
+			EFFECT_CANNOT_LOSE_LP),
+		"player protection must not leak to a cross-side teammate");
+	auto* team_zero_cannot_draw = universal_team.new_effect();
+	team_zero_cannot_draw->owner = team_zero_player_zero;
+	team_zero_cannot_draw->type = EFFECT_TYPE_FIELD;
+	team_zero_cannot_draw->code = EFFECT_CANNOT_DRAW;
+	team_zero_cannot_draw->flag[0] = EFFECT_FLAG_PLAYER_TARGET;
+	team_zero_cannot_draw->range = LOCATION_MZONE;
+	team_zero_cannot_draw->s_range = 1;
+	team_zero_player_zero->add_effect(team_zero_cannot_draw);
+	expect(!universal_team_field.is_player_can_draw(0, 0),
+		"a logical player's cannot-draw effect must apply to that player");
+	expect(universal_team_field.is_player_can_draw(0, 1),
+		"a logical player's cannot-draw effect must not block a same-side player");
+	expect(universal_team_field.is_player_can_draw(1, 0),
+		"a logical player's cannot-draw effect must not block a cross-side teammate");
+	universal_team_field.core.subunits.clear();
+	Processors::Damage team_effect_damage(0, nullptr, REASON_EFFECT, 0,
+		team_zero_player_zero, 0, 500, false, 1, true);
+	expect(!universal_team_field.process(team_effect_damage),
+		"Universal Teams effect damage must pause for a teammate interception");
+	auto* team_intercept_prompt =
+		Processors::get_opt_variant<Processors::SelectYesNo>(
+			universal_team_field.core.subunits.back());
+	expect(team_intercept_prompt && team_intercept_prompt->playerid == 5,
+		"only the victim's cross-side teammate must receive the interception prompt");
+	universal_team_field.core.subunits.clear();
+
+	take_messages(universal_team);
+	const auto first_team_elimination = OCG_DuelEliminatePlayer(&universal_team,
+		1, static_cast<uint8_t>(PlayerEliminationReason::SURRENDER));
+	expect((first_team_elimination & OCG_MULTIPLAYER_ELIMINATION_APPLIED)
+			&& !(first_team_elimination & OCG_MULTIPLAYER_ELIMINATION_FINISHED),
+		"eliminating one Universal Teams member must leave their teammate active");
+	const auto final_team_elimination = OCG_DuelEliminatePlayer(&universal_team,
+		3, static_cast<uint8_t>(PlayerEliminationReason::SURRENDER));
+	expect(final_team_elimination & OCG_MULTIPLAYER_ELIMINATION_FINISHED,
+		"eliminating the final member of a team must finish Universal Teams");
+	const auto universal_team_win_messages = take_messages(universal_team);
+	const auto win_message = std::find_if(universal_team_win_messages.begin(),
+		universal_team_win_messages.end(), [](const auto& message) {
+			return !message.empty() && message[0] == MSG_WIN;
+		});
+	expect(win_message != universal_team_win_messages.end()
+			&& win_message->size() == 5
+			&& (*win_message)[1] == PLAYER_NONE
+			&& (*win_message)[3] == MultiplayerState::NO_PLAYER
+			&& (*win_message)[4] == 0,
+		"Universal Teams must encode the winning team without inventing an invalid physical-side winner");
 
 	std::cout << "All multiplayer field tests passed.\n";
 	return 0;

@@ -453,6 +453,7 @@ public:
 	void publish_multiplayer_private_piles(uint8_t logical_player);
 	void publish_all_multiplayer_private_piles();
 	void publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent);
+	void publish_multiplayer_effect_view(effect* source_effect, card* target);
 	uint8_t get_effect_duelist(uint8_t playerid) const;
 	uint8_t get_response_player(uint8_t playerid) const;
 	int32_t is_field_location_valid(uint32_t location, uint32_t sequence);

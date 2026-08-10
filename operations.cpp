@@ -90,6 +90,9 @@ void field::change_target(uint8_t chaincount, group* targets) {
 		for(auto& pcard : ot->container)
 			pcard->create_relation(core.current_chain[chaincount - 1]);
 		if(te->is_flag(EFFECT_FLAG_CARD_TARGET)) {
+			if(!ot->container.empty())
+				publish_multiplayer_effect_view(
+					te, *ot->container.begin());
 			auto message = pduel->new_message(MSG_BECOME_TARGET);
 			message->write<uint32_t>(ot->container.size());
 			for(auto& pcard : ot->container) {
@@ -746,9 +749,20 @@ bool field::process(Processors::Damage& arg) {
 	case 20: {
 		if(returns.at<int32_t>(0)) {
 			const auto logical_player = arg.interceptors[arg.interceptor_index];
-			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+			if(multiplayer.enabled()) {
+				const auto* source_card = reason_card ? reason_card
+					: reason_effect ? reason_effect->get_handler() : nullptr;
+				auto source_logical = source_card
+						&& source_card->current.controler < 2
+					? multiplayer.logical_player(source_card->current.controler,
+						source_card->current.duelist)
+					: multiplayer.current_player();
+				if(!multiplayer.is_active(source_logical))
+					source_logical = multiplayer.current_player();
 				publish_multiplayer_replay_view(
-					multiplayer.current_player(), logical_player);
+					source_logical, logical_player);
+			}
+			if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
 				playerid = multiplayer.field_side_of(logical_player);
 				arg.playerid = playerid;
 			}

@@ -231,7 +231,7 @@ void field::publish_all_multiplayer_private_piles() {
 }
 
 void field::publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent) {
-	if(multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE
+	if(!multiplayer.enabled()
 			|| primary >= MultiplayerState::MAX_PLAYERS
 			|| opponent >= MultiplayerState::MAX_PLAYERS
 			|| primary == opponent
@@ -246,6 +246,26 @@ void field::publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent) {
 	// retained in the replay so both displayed resource areas are exact.
 	publish_multiplayer_private_piles(primary);
 	publish_multiplayer_private_piles(opponent);
+}
+
+void field::publish_multiplayer_effect_view(effect* source_effect, card* target) {
+	if(!multiplayer.enabled() || !source_effect || !target)
+		return;
+	const auto* source = source_effect->get_handler();
+	if(!source || source->current.controler > 1
+			|| target->current.controler > 1)
+		return;
+	const auto source_logical = multiplayer.logical_player(
+		source->current.controler, source->current.duelist);
+	const auto target_logical = multiplayer.logical_player(
+		target->current.controler, target->current.duelist);
+	if(source_logical == MultiplayerState::NO_PLAYER
+			|| target_logical == MultiplayerState::NO_PLAYER
+			|| source_logical == target_logical
+			|| !multiplayer.is_active(source_logical)
+			|| !multiplayer.is_active(target_logical))
+		return;
+	publish_multiplayer_replay_view(source_logical, target_logical);
 }
 
 uint8_t field::get_effect_duelist(uint8_t playerid) const {
@@ -494,6 +514,10 @@ void field::remove_card(card* pcard) {
 // 5. move_card()
 // check Fusion/S/X monster redirection by the rule
 bool field::move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone) {
+	// Cards sent to the Graveyard always return to their original logical
+	// owner's private Graveyard, even after temporary control changes.
+	if(multiplayer.enabled() && location == LOCATION_GRAVE && pcard->owner < 2)
+		playerid = pcard->owner;
 	uint8_t preplayer = pcard->current.controler;
 	uint8_t presequence = pcard->current.sequence;
 	const auto target_duelist = static_cast<uint8_t>((location & LOCATION_ONFIELD)
@@ -1461,6 +1485,10 @@ void field::tag_swap(uint8_t playerid) {
 			message->write<uint32_t>(pcard->data.code);
 			message->write<uint32_t>(pcard->current.position);
 		}
+		// Preserve the authoritative logical owner in replay and rapid turn
+		// transitions instead of deriving it later from a mutable active seat.
+		message->write<uint8_t>(multiplayer.logical_player(
+			playerid, player[playerid].current_duelist));
 	}
 	player[playerid].tag_index = (player[playerid].tag_index + 1) % player[playerid].extra_lists_main.size();
 	if(multiplayer.enabled()) {

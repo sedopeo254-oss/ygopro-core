@@ -4,6 +4,7 @@
 #include "field.h"
 #include "ocgapi.h"
 
+#include <array>
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
@@ -66,6 +67,14 @@ std::vector<std::vector<uint8_t>> take_messages(duel& game) {
 	game.clear_buffer();
 	return messages;
 }
+
+uint32_t read_u32(const std::vector<uint8_t>& message, size_t offset) {
+	expect(offset + sizeof(uint32_t) <= message.size(),
+		"the message must contain the requested uint32 value");
+	uint32_t value = 0;
+	std::memcpy(&value, message.data() + offset, sizeof(value));
+	return value;
+}
 }
 
 int main() {
@@ -122,6 +131,33 @@ int main() {
 	expect(field.get_response_player(0) == 4,
 		"the current allied field must remain the response fallback without an effect handler");
 
+	// Deck Master code-only choices have no real field location. The synthetic
+	// location must still carry each player's logical duelist index so players
+	// 2 and 3 receive their own face-up choices instead of card backs.
+	const std::array<uint8_t, 4> deck_master_selectors{ 2, 3, 4, 1 };
+	const std::array<uint8_t, 4> deck_master_sides{ 0, 0, 0, 1 };
+	const std::array<uint8_t, 4> deck_master_duelists{ 0, 1, 2, 0 };
+	take_messages(game);
+	for(uint8_t logical = 0; logical < 4; ++logical) {
+		field.core.select_cards_codes = { { 9000u + logical, 1u } };
+		Processors::SelectCardCodes deck_master_select(
+			0, deck_master_selectors[logical], false, 1, 1,
+			deck_master_sides[logical], deck_master_duelists[logical]);
+		expect(!field.process(deck_master_select),
+			"a Deck Master code selection must wait for its logical player");
+		const auto deck_master_messages = take_messages(game);
+		expect(deck_master_messages.size() == 1,
+			"a Deck Master code selection must emit exactly one prompt");
+		const auto& prompt = deck_master_messages.front();
+		expect(prompt.size() == 29 && prompt[0] == MSG_SELECT_CARD
+				&& prompt[1] == deck_master_selectors[logical]
+				&& read_u32(prompt, 15) == 9000u + logical
+				&& prompt[19] == deck_master_sides[logical]
+				&& (read_u32(prompt, 25) >> 24)
+					== deck_master_duelists[logical],
+			"every 3v1 player must receive Deck Master choices tagged with their logical seat");
+	}
+
 	auto* tristan_hand = game.new_card(2003);
 	tristan_hand->owner = 0;
 	tristan_hand->owner_duelist = 1;
@@ -146,6 +182,15 @@ int main() {
 	expect(field.tag_swap_to(0, 1), "the active resources must switch back to Tristan");
 	expect(field.player[0].list_grave.size() == 1 && field.player[0].list_grave.front() == tristan,
 		"Tristan's graveyard must be restored with his card");
+	auto* controlled_ally = game.new_card(2006);
+	controlled_ally->owner = 0;
+	controlled_ally->owner_duelist = 1;
+	field.add_card(1, controlled_ally, LOCATION_MZONE, 1);
+	expect(field.move_card(1, controlled_ally, LOCATION_GRAVE, 0),
+		"a temporarily controlled ally card must be sent to a Graveyard");
+	expect(field.get_logical_list(0, LOCATION_GRAVE, 1).size() == 2
+			&& field.get_logical_list(0, LOCATION_GRAVE, 1).back() == controlled_ally,
+		"a temporarily controlled card must return to its original logical owner's Graveyard");
 
 	const auto tristan_hand_count = field.get_logical_list(0, LOCATION_HAND, 1).size();
 	const auto duke_hand_count = field.get_logical_list(0, LOCATION_HAND, 2).size();
@@ -197,6 +242,45 @@ int main() {
 	field.get_attack_target(nezbitt, &attack_targets);
 	expect(attack_targets.size() == 1 && attack_targets.front() == duke,
 		"changing the selected attack target must project Duke's monster field");
+	take_messages(game);
+	field.publish_multiplayer_replay_view(3, 2);
+	const auto three_view_messages = take_messages(game);
+	expect(three_view_messages.size() == 3
+			&& three_view_messages[0].size() == 3
+			&& three_view_messages[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& three_view_messages[0][1] == 3
+			&& three_view_messages[0][2] == 2,
+		"3v1 replay views must identify Nezbitt and the selected allied field");
+	expect(three_view_messages[1][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& three_view_messages[1][1] == 3
+			&& three_view_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
+			&& three_view_messages[2][1] == 2,
+		"3v1 replay views must carry private-pile snapshots for both displayed players");
+	take_messages(game);
+	field.publish_multiplayer_effect_view(duke_effect, serenity);
+	const auto effect_target_view = take_messages(game);
+	expect(effect_target_view.size() == 3
+			&& effect_target_view[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& effect_target_view[0][1] == 2
+			&& effect_target_view[0][2] == 0,
+		"a card effect targeting another logical field must publish its exact replay view");
+	Processors::BattleCommand three_target_choice(4);
+	three_target_choice.attack_target_duelists = { 0, 2 };
+	three_target_choice.interception_offered = true;
+	field.infos.turn_player = 1;
+	field.core.attacker = nezbitt;
+	field.returns.set<int32_t>(0, 1);
+	take_messages(game);
+	expect(!field.process(three_target_choice)
+			&& field.core.attack_target_duelist == 2
+			&& field.core.attack_target_logical == 2,
+		"selecting Duke as Nezbitt's target must update both duelist and logical target identities");
+	const auto target_choice_messages = take_messages(game);
+	expect(target_choice_messages.size() >= 3
+			&& target_choice_messages[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& target_choice_messages[0][1] == 3
+			&& target_choice_messages[0][2] == 2,
+		"3v1 target selection must publish the selected field before attack resolution");
 	field.core.subunits.clear();
 	field.core.attack_target = nullptr;
 	field.damage(nullptr, REASON_BATTLE, 1, nezbitt, 0, 500);
@@ -210,9 +294,16 @@ int main() {
 	expect(intercept_prompt && intercept_prompt->playerid == 3,
 		"the first Let me take it prompt must be routed to Tristan's logical seat");
 	field.returns.set<int32_t>(0, 1);
+	take_messages(game);
 	effect_damage.step = 20;
 	expect(!field.process(effect_damage) && effect_damage.duelist == 1,
 		"accepting Let me take it must redirect effect damage to Tristan's life points");
+	const auto three_intercept_messages = take_messages(game);
+	expect(three_intercept_messages.size() == 3
+			&& three_intercept_messages[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
+			&& three_intercept_messages[0][1] == 3
+			&& three_intercept_messages[0][2] == 1,
+		"accepting Let me take it in 3v1 must switch replay focus to the interceptor");
 	field.core.subunits.clear();
 	const auto serenity_lp = field.get_logical_lp(0, 0);
 	Processors::Damage batch_damage(0, nullptr, REASON_EFFECT, 1, nezbitt, 0, 100, false, 0, false);

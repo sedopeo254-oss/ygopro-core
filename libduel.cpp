@@ -2721,12 +2721,14 @@ LUA_STATIC_FUNCTION(SelectCardsFromCodesPlayer) {
 	const auto logical_player = lua_get<uint8_t>(L, 1);
 	uint8_t playerid = logical_player;
 	uint8_t display_playerid = logical_player;
+	uint8_t display_duelist = 0;
 	if(pduel->game_field->multiplayer.enabled()) {
 		if(logical_player >= MultiplayerState::MAX_PLAYERS
 				|| !pduel->game_field->multiplayer.is_active(logical_player))
 			return 0;
 		playerid = pduel->game_field->multiplayer.prompt_player_of(logical_player);
 		display_playerid = pduel->game_field->multiplayer.field_side_of(logical_player);
+		display_duelist = pduel->game_field->multiplayer.duelist_index_of(logical_player);
 	}
 	if(playerid == MultiplayerState::NO_PLAYER || display_playerid > 1)
 		return 0;
@@ -2738,7 +2740,7 @@ LUA_STATIC_FUNCTION(SelectCardsFromCodesPlayer) {
 		select_codes.emplace_back(lua_get<uint32_t>(L, -1), static_cast<uint32_t>(select_codes.size() + 1));
 	});
 	pduel->game_field->emplace_process<Processors::SelectCardCodes>(
-		playerid, cancelable, min, max, display_playerid);
+		playerid, cancelable, min, max, display_playerid, display_duelist);
 	return yieldk({
 		int ret = 1;
 		const auto& ret_codes = pduel->game_field->return_card_codes;
@@ -3062,6 +3064,8 @@ LUA_STATIC_FUNCTION(SelectTarget) {
 				for(auto& pcard : pret->container) {
 					pcard->create_relation(*ch);
 					if(peffect->is_flag(EFFECT_FLAG_CARD_TARGET)) {
+						pduel->game_field->publish_multiplayer_effect_view(
+							peffect, pcard);
 						auto message = pduel->new_message(MSG_BECOME_TARGET);
 						message->write<uint32_t>(1);
 						message->write(pcard->get_info_location());
@@ -3175,6 +3179,11 @@ LUA_STATIC_FUNCTION(SetTargetCard) {
 				_pcard->create_relation(*ch);
 		}
 		if(peffect->is_flag(EFFECT_FLAG_CARD_TARGET)) {
+			card* replay_target = pcard;
+			if(!replay_target && pgroup && !pgroup->container.empty())
+				replay_target = *pgroup->container.begin();
+			pduel->game_field->publish_multiplayer_effect_view(
+				peffect, replay_target);
 			auto message = pduel->new_message(MSG_BECOME_TARGET);
 			if(pcard) {
 				message->write<uint32_t>(1);
@@ -3422,6 +3431,13 @@ LUA_STATIC_FUNCTION(HintSelection) {
 	check_param_count(L, 1);
 	auto [pcard, pgroup] = lua_get_card_or_group(L, 1);
 	bool selection = lua_get<bool, true>(L, 2);
+	if(!selection) {
+		card* replay_target = pcard;
+		if(!replay_target && pgroup && !pgroup->container.empty())
+			replay_target = *pgroup->container.begin();
+		pduel->game_field->publish_multiplayer_effect_view(
+			pduel->game_field->core.reason_effect, replay_target);
+	}
 	auto message = pduel->new_message(selection ? MSG_CARD_SELECTED : MSG_BECOME_TARGET);
 	if(pcard) {
 		message->write<uint32_t>(1);

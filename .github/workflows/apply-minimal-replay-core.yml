@@ -51,7 +51,7 @@ jobs:
 
           ! git diff | grep -E 'DUEL_UNIVERSAL_MULTIPLAYER|UniversalMultiplayer|configure_universal'
           grep -q 'publish_multiplayer_effect_view' field.cpp
-          grep -q 'authoritative camera pair immediately before MSG_ATTACK' processor.cpp
+          grep -q 'authoritative attacker/target pair immediately before' processor.cpp
           grep -q 'selecting Duke as Nezbitt' tests/multiplayer_field_tests.cpp
 
       - name: Run multiplayer state and field tests

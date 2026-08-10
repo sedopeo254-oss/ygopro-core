@@ -58,6 +58,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive
           sh ./tests/run_multiplayer_state_tests.sh
           sh ./tests/run_multiplayer_field_tests.sh
 

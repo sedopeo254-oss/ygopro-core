@@ -1,0 +1,73 @@
+name: Apply minimal replay and targeting core backport
+
+on:
+  push:
+    branches:
+      - automation/apply-minimal-replay-core-20260811
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-minimal-replay-core-20260811
+  cancel-in-progress: false
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply only the reviewed replay and targeting patch
+        shell: bash
+        env:
+          TARGET_BRANCH: candidate/3v1-replay-targeting-minimal-20260811
+        run: |
+          set -euo pipefail
+          base64 -d .github/patches/minimal-replay-targeting-core.patch.gz.b64 | gzip -d > /tmp/minimal-core.patch
+          git fetch origin "$TARGET_BRANCH"
+          git checkout -B publish-target "origin/$TARGET_BRANCH"
+          git apply --check /tmp/minimal-core.patch
+          git apply /tmp/minimal-core.patch
+          git diff --check
+
+          expected=$(cat <<'EOF'
+          field.cpp
+          field.h
+          libduel.cpp
+          operations.cpp
+          playerop.cpp
+          processor.cpp
+          processor_unit.h
+          tests/multiplayer_field_tests.cpp
+          EOF
+          )
+          actual=$(git diff --name-only | sort)
+          test "$actual" = "$(printf '%s\n' "$expected" | sed 's/^          //' | sort)"
+
+          ! git diff | grep -E 'DUEL_UNIVERSAL_MULTIPLAYER|UniversalMultiplayer|configure_universal'
+          grep -q 'publish_multiplayer_effect_view' field.cpp
+          grep -q 'authoritative camera pair immediately before MSG_ATTACK' processor.cpp
+          grep -q 'selecting Duke as Nezbitt' tests/multiplayer_field_tests.cpp
+
+      - name: Run multiplayer state and field tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh ./tests/run_multiplayer_state_tests.sh
+          sh ./tests/run_multiplayer_field_tests.sh
+
+      - name: Publish tested candidate core
+        shell: bash
+        env:
+          TARGET_BRANCH: candidate/3v1-replay-targeting-minimal-20260811
+        run: |
+          set -euo pipefail
+          git config user.name "sedopeo254-oss"
+          git config user.email "sedopeo254@gmail.com"
+          git add -- field.cpp field.h libduel.cpp operations.cpp playerop.cpp processor.cpp processor_unit.h tests/multiplayer_field_tests.cpp
+          git diff --cached --check
+          git commit -m "Backport replay direction and target selection without CaD"
+          git push origin HEAD:"$TARGET_BRANCH"

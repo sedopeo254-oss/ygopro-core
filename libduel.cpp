@@ -3885,6 +3885,39 @@ LUA_STATIC_FUNCTION(AnnounceNumber) {
 		return 2;
 	});
 }
+LUA_STATIC_FUNCTION(AnnounceNumberPlayer) {
+    check_action_permission(L);
+    check_param_count(L, 2);
+    const auto logical_player = lua_get<uint8_t>(L, 1);
+    uint8_t selecting_player = logical_player;
+    if(pduel->game_field->multiplayer.enabled()) {
+        if(logical_player >= MultiplayerState::MAX_PLAYERS
+                || !pduel->game_field->multiplayer.is_active(logical_player))
+            return 0;
+        selecting_player = pduel->game_field->multiplayer.prompt_player_of(logical_player);
+    } else if(logical_player > 1) {
+        return 0;
+    }
+    if(selecting_player == MultiplayerState::NO_PLAYER)
+        return 0;
+    pduel->game_field->core.select_options.clear();
+    lua_iterate_table_or_stack(L, 2, lua_gettop(L),
+            [L, &select_options = pduel->game_field->core.select_options] {
+                select_options.push_back(lua_get<uint64_t>(L, -1));
+            });
+    if(pduel->game_field->core.select_options.empty())
+        return 0;
+    pduel->game_field->emplace_process<Processors::AnnounceNumber>(selecting_player);
+    return yieldk({
+        const auto selected = pduel->game_field->returns.at<int32_t>(0);
+        if(selected < 0
+                || static_cast<size_t>(selected) >= pduel->game_field->core.select_options.size())
+            return 0;
+        lua_pushinteger(L, pduel->game_field->core.select_options[selected]);
+        lua_pushinteger(L, selected);
+        return 2;
+    });
+}
 LUA_STATIC_FUNCTION(AnnounceCoin) {
 	check_action_permission(L);
 	check_param_count(L, 1);

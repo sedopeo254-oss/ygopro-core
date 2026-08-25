@@ -16,7 +16,7 @@ index 5713d90..e6ca0f1 100644
  	auto message = pduel->new_message(MSG_MULTIPLAYER_REPLAY_VIEW);
  	message->write<uint8_t>(primary);
  	message->write<uint8_t>(opponent);
-@@ -520,8 +527,16 @@ bool field::move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t s
+@@ -520,8 +527,16 @@ bool field::move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone) {
  		playerid = pcard->owner;
  	uint8_t preplayer = pcard->current.controler;
  	uint8_t presequence = pcard->current.sequence;
@@ -34,7 +34,7 @@ index 5713d90..e6ca0f1 100644
  			? pcard->current.duelist : player[playerid].current_duelist)
  		: (playerid == pcard->owner ? pcard->owner_duelist : player[playerid].current_duelist));
  	if(location == LOCATION_MZONE || location == LOCATION_SZONE)
-@@ -662,7 +677,8 @@ bool field::move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t s
+@@ -662,7 +677,8 @@ bool field::move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t sequence, bool pzone) {
  			remove_card(pcard);
  		}
  	}

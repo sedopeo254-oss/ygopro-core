@@ -1,0 +1,46 @@
+name: Apply 3v1 Replay Smooth Final Core Fix
+
+on:
+  push:
+    branches:
+      - fix/3v1-replay-smooth-final-20260826
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-3v1-replay-smooth-final-core
+  cancel-in-progress: true
+
+jobs:
+  apply-test-publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: Apply source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check .github/patches/3v1-replay-smooth-final.patch
+          git apply .github/patches/3v1-replay-smooth-final.patch
+          git diff --check
+      - name: Run multiplayer tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh ./tests/run_multiplayer_state_tests.sh
+          sh ./tests/run_multiplayer_field_tests.sh
+      - name: Publish validated source and remove bootstrap files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/patches/3v1-replay-smooth-final.patch
+          rm -f .github/workflows/apply-3v1-replay-smooth-final.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix 3v1 replay view dedupe and Deck Master ownership"
+          git push origin HEAD:fix/3v1-replay-smooth-final-20260826

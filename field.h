@@ -410,6 +410,8 @@ public:
 	duel* pduel;
 	std::array<player_info,2> player;
 	MultiplayerState multiplayer;
+	uint8_t last_replay_view_primary{ MultiplayerState::NO_PLAYER };
+	uint8_t last_replay_view_opponent{ MultiplayerState::NO_PLAYER };
 	card* temp_card;
 	field_info infos;
 	//lpcost cost[2];

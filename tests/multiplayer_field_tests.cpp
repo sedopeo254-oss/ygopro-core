@@ -4,6 +4,7 @@
 #include "field.h"
 #include "ocgapi.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <cstdlib>
@@ -192,6 +193,39 @@ int main() {
 			&& field.get_logical_list(0, LOCATION_GRAVE, 1).back() == controlled_ally,
 		"a temporarily controlled card must return to its original logical owner's Graveyard");
 
+	// Regression: P3 may remain the displayed teammate while P2's Deck Master
+	// moves from P2's private pile to P2's field and then to P2's Graveyard.
+	// This operation must not emit TAG_SWAP or borrow P3's logical ownership.
+	expect(field.tag_swap_to(0, 2), "P3 must be focused before the Deck Master owner regression");
+	expect(field.player[0].current_duelist == 2,
+		"the Deck Master regression must begin with P3 focused");
+	auto* tristan_deck_master = game.new_card(153000012);
+	tristan_deck_master->owner = 0;
+	tristan_deck_master->owner_duelist = 1;
+	field.add_card(0, tristan_deck_master, LOCATION_DECK, 0, false, 1);
+	expect(tristan_deck_master->current.duelist == 1,
+		"the Deck Master stand-in must begin in P2's logical private pile");
+	take_messages(game);
+	expect(field.move_card(0, tristan_deck_master, LOCATION_MZONE, 1),
+		"P2's Deck Master must enter an on-field zone while P3 remains focused");
+	expect(field.player[0].current_duelist == 2,
+		"summoning P2's Deck Master must not change the displayed P3 field");
+	expect(tristan_deck_master->current.duelist == 1
+			&& tristan_deck_master->current.sequence == 8
+			&& field.player[0].list_mzone[8] == tristan_deck_master,
+		"P2's Deck Master must occupy P2's encoded monster zone, never P3's");
+	const auto owner_lock_messages = take_messages(game);
+	expect(std::none_of(owner_lock_messages.begin(), owner_lock_messages.end(),
+		[](const auto& message) { return !message.empty() && message[0] == MSG_TAG_SWAP; }),
+		"Deck Master movement must not mutate replay perspective with TAG_SWAP");
+	expect(field.move_card(0, tristan_deck_master, LOCATION_GRAVE, 0),
+		"P2's summoned Deck Master must move to its logical Graveyard");
+	expect(field.get_logical_list(0, LOCATION_GRAVE, 1).back() == tristan_deck_master
+			&& tristan_deck_master->current.duelist == 1,
+		"P2's Deck Master code and ownership must remain in P2's Graveyard");
+	expect(field.player[0].current_duelist == 2,
+		"Deck Master Graveyard routing must leave P3's replay field displayed");
+
 	const auto tristan_hand_count = field.get_logical_list(0, LOCATION_HAND, 1).size();
 	const auto duke_hand_count = field.get_logical_list(0, LOCATION_HAND, 2).size();
 	Processors::Draw duke_draw(0, nullptr, REASON_EFFECT, 0, 0, 1, 2);
@@ -256,6 +290,9 @@ int main() {
 			&& three_view_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
 			&& three_view_messages[2][1] == 2,
 		"3v1 replay views must carry private-pile snapshots for both displayed players");
+	field.publish_multiplayer_replay_view(3, 2);
+	expect(take_messages(game).empty(),
+		"an identical replay view must not emit duplicate hand snapshots or stall playback");
 	take_messages(game);
 	field.publish_multiplayer_effect_view(duke_effect, serenity);
 	const auto effect_target_view = take_messages(game);
@@ -469,17 +506,8 @@ int main() {
 			&& royale_effect_damage.duelist == 1,
 		"Battle Royale interception must redirect damage to the accepting player's own LP");
 	const auto intercept_view_messages = take_messages(royale);
-	expect(intercept_view_messages.size() == 3
-			&& intercept_view_messages[0].size() == 3
-			&& intercept_view_messages[0][0] == MSG_MULTIPLAYER_REPLAY_VIEW
-			&& intercept_view_messages[0][1] == 0
-			&& intercept_view_messages[0][2] == 1,
-		"accepting Let me take it must switch the replay view to the interceptor");
-	expect(intercept_view_messages[1][0] == MSG_MULTIPLAYER_PRIVATE_PILES
-			&& intercept_view_messages[1][1] == 0
-			&& intercept_view_messages[2][0] == MSG_MULTIPLAYER_PRIVATE_PILES
-			&& intercept_view_messages[2][1] == 1,
-		"the accepted interceptor replay view must include both complete private-pile snapshots");
+	expect(intercept_view_messages.empty(),
+		"a second event using the same interceptor view must not repeat the camera or private snapshots");
 	const auto yugi_lp = royale_field.get_logical_lp(0, 1);
 	royale_effect_damage.step = 0;
 	expect(!royale_field.process(royale_effect_damage),

@@ -238,6 +238,13 @@ void field::publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent) {
 			|| !multiplayer.is_active(primary)
 			|| !multiplayer.is_active(opponent))
 		return;
+	// A single attack/selection can reach this helper through several engine
+	// paths. Re-emitting the same camera pair plus two full private snapshots
+	// makes replays rebuild the same hand repeatedly and causes visible stalls.
+	if(last_replay_view_primary == primary && last_replay_view_opponent == opponent)
+		return;
+	last_replay_view_primary = primary;
+	last_replay_view_opponent = opponent;
 	auto message = pduel->new_message(MSG_MULTIPLAYER_REPLAY_VIEW);
 	message->write<uint8_t>(primary);
 	message->write<uint8_t>(opponent);
@@ -520,8 +527,16 @@ bool field::move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t s
 		playerid = pcard->owner;
 	uint8_t preplayer = pcard->current.controler;
 	uint8_t presequence = pcard->current.sequence;
+	// Logical ownership is independent from the teammate currently projected by
+	// the client. A card leaving one logical player's private pile for the field
+	// must keep that duelist, otherwise P2's Deck Master is attached to P3.
+	const bool preserve_private_duelist = multiplayer.enabled() && preplayer == playerid
+		&& (pcard->current.location & (LOCATION_DECK | LOCATION_HAND | LOCATION_GRAVE
+			| LOCATION_REMOVED | LOCATION_EXTRA))
+		&& pcard->current.duelist < multiplayer.field_count(playerid);
 	const auto target_duelist = static_cast<uint8_t>((location & LOCATION_ONFIELD)
-		? ((pcard->current.location & LOCATION_ONFIELD) && preplayer == playerid
+		? ((((pcard->current.location & LOCATION_ONFIELD) && preplayer == playerid)
+			|| preserve_private_duelist)
 			? pcard->current.duelist : player[playerid].current_duelist)
 		: (playerid == pcard->owner ? pcard->owner_duelist : player[playerid].current_duelist));
 	if(location == LOCATION_MZONE || location == LOCATION_SZONE)
@@ -662,7 +677,8 @@ bool field::move_card(uint8_t playerid, card* pcard, uint8_t location, uint8_t s
 			remove_card(pcard);
 		}
 	}
-	add_card(playerid, pcard, location, sequence, pzone);
+	// The encoded zone and the card state must agree on the same logical owner.
+	add_card(playerid, pcard, location, sequence, pzone, target_duelist);
 	return true;
 }
 void field::swap_card(card* pcard1, card* pcard2, uint8_t new_sequence1, uint8_t new_sequence2) {

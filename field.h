@@ -637,6 +637,7 @@ public:
 	bool process(Processors::RefreshLoc& arg);
 	bool process(Processors::Adjust& arg);
 	bool process(Processors::Startup& arg);
+	bool process(Processors::BattleRoyaleTurnOrder& arg);
 	bool process(Processors::RefreshRelay& arg);
 
 	//operations

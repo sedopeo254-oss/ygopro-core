@@ -281,7 +281,10 @@ bool inline field::parse_response_cards(bool cancelable) {
 }
 bool field::process(Processors::SelectCard& arg) {
 	auto playerid = arg.playerid;
-	const auto selecting_player = get_response_player(playerid);
+	const auto selecting_player = multiplayer.enabled()
+			&& arg.logical_player < MultiplayerState::MAX_PLAYERS
+		? multiplayer.prompt_player_of(arg.logical_player)
+		: get_response_player(playerid);
 	auto cancelable = arg.cancelable;
 	auto min = arg.min;
 	auto max = arg.max;

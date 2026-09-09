@@ -36,6 +36,7 @@ done
 	"$root_dir/operations.cpp" \
 	"$root_dir/playerop.cpp" \
 	"$root_dir/processor.cpp" \
+	"$root_dir/battle_royale_turn_order.cpp" \
 	"$root_dir/processor_visit.cpp" \
 	"$root_dir/scriptlib.cpp" \
 	"$root_dir/tests/multiplayer_field_tests.cpp" \

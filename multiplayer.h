@@ -49,6 +49,7 @@ public:
 	uint8_t current_player() const;
 	uint8_t advance_turn();
 	uint8_t next_active_player(uint8_t player) const;
+	bool set_turn_order_by_attack(const std::array<int32_t, MAX_PLAYERS>& attack_values);
 
 	bool eliminate(uint8_t player, PlayerEliminationReason reason);
 	uint8_t eliminate_many(uint8_t player_mask,

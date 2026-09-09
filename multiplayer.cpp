@@ -3,6 +3,7 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
+#include <algorithm>
 #include "multiplayer.h"
 
 void MultiplayerState::configure(MultiplayerMode new_mode) {
@@ -127,6 +128,19 @@ uint8_t MultiplayerState::zone_duelist_index(uint8_t field_side, uint8_t stride,
 		return 0;
 	const auto duelist = static_cast<uint8_t>(sequence / stride);
 	return duelist < field_count(field_side) ? duelist : 0;
+}
+
+bool MultiplayerState::set_turn_order_by_attack(
+        const std::array<int32_t, MAX_PLAYERS>& attack_values) {
+    if(duel_mode != MultiplayerMode::BATTLE_ROYALE)
+        return false;
+    std::array<uint8_t, MAX_PLAYERS> ordered{ 0, 2, 1, 3 };
+    std::stable_sort(ordered.begin(), ordered.end(), [&](uint8_t lhs, uint8_t rhs) {
+        return attack_values[lhs] > attack_values[rhs];
+    });
+    turn_order = ordered;
+    turn_player = turn_order[0];
+    return true;
 }
 
 uint8_t MultiplayerState::current_player() const {

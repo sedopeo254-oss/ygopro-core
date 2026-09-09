@@ -5416,6 +5416,10 @@ bool field::process(Processors::Startup& arg) {
 		return FALSE;
 	}
 	case 1: {
+		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE) {
+			emplace_process<Processors::BattleRoyaleTurnOrder>();
+			return FALSE;
+		}
 		for(int p = 0; p < 2; p++) {
 			core.shuffle_hand_check[p] = false;
 			core.shuffle_deck_check[p] = false;
@@ -5438,6 +5442,31 @@ bool field::process(Processors::Startup& arg) {
 			}
 		}
 		emplace_process<Processors::Turn>(0);
+		return TRUE;
+	}
+	case 2: {
+		for(int p = 0; p < 2; p++) {
+			core.shuffle_hand_check[p] = false;
+			core.shuffle_deck_check[p] = false;
+			if(player[p].start_count > 0)
+				draw(nullptr, REASON_RULE, PLAYER_NONE, p, player[p].start_count);
+			auto list_size = player[p].extra_lists_main.size();
+			for(size_t l = 0; l < list_size; l++) {
+				auto& main = player[p].extra_lists_main[l];
+				auto& hand = player[p].extra_lists_hand[l];
+				for(int i = 0; i < player[p].start_count && !main.empty(); ++i) {
+					card* pcard = main.back();
+					main.pop_back();
+					hand.push_back(pcard);
+					pcard->current.controler = p;
+					pcard->current.location = LOCATION_HAND;
+					pcard->current.sequence = static_cast<uint32_t>(hand.size() - 1);
+					pcard->current.position = POS_FACEDOWN;
+				}
+			}
+		}
+		const auto first_logical = multiplayer.current_player();
+		emplace_process<Processors::Turn>(multiplayer.field_side_of(first_logical));
 		return TRUE;
 	}
 	}

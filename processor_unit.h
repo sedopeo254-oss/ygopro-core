@@ -6,6 +6,7 @@
 #ifndef PROCESSOR_UNIT_H_
 #define PROCESSOR_UNIT_H_
 
+#include <array>
 #include <cstdint>
 #include <map> //std::multimap
 #include <memory> //std::unique_ptr
@@ -49,6 +50,12 @@ struct RefreshLoc : public Process<false> {
 struct Startup : public Process<false> {
 	Startup(uint16_t step_) : Process(step_) {}
 };
+struct BattleRoyaleTurnOrder : public Process<false> {
+	uint8_t logical_player{ 0 };
+	std::array<card*, 4> selected_cards{};
+	std::array<int32_t, 4> selected_attack{};
+	BattleRoyaleTurnOrder(uint16_t step_) : Process(step_) {}
+};
 struct SelectBattleCmd : public Process<true> {
 	uint8_t playerid;
 	SelectBattleCmd(uint16_t step_, uint8_t playerid_) : Process(step_), playerid(playerid_) {}
@@ -76,12 +83,14 @@ struct SelectOption : public Process<true> {
 };
 struct SelectCard : public Process<true> {
 	uint8_t playerid;
+	uint8_t logical_player;
 	bool cancelable;
 	uint8_t min;
 	uint8_t max;
 	SelectCard(uint16_t step_, uint8_t playerid_, bool cancelable_,
-			   uint8_t min_, uint8_t max_) :
-		Process(step_), playerid(playerid_), cancelable(cancelable_), min(min_), max(max_) {}
+			   uint8_t min_, uint8_t max_, uint8_t logical_player_ = 0xff) :
+		Process(step_), playerid(playerid_), logical_player(logical_player_),
+		cancelable(cancelable_), min(min_), max(max_) {}
 };
 struct SelectCardCodes : public Process<true> {
 	uint8_t playerid;
@@ -770,7 +779,7 @@ struct RefreshRelay : public Process<false> {
 		Process(step_) {}
 };
 
-using processors = std::variant<Adjust, Turn, RefreshLoc, Startup,
+using processors = std::variant<Adjust, Turn, RefreshLoc, Startup, BattleRoyaleTurnOrder,
 	SelectBattleCmd, SelectIdleCmd, SelectEffectYesNo, SelectYesNo,
 	SelectOption, SelectCard, SelectCardCodes, SelectUnselectCard,
 	SelectChain, SelectPlace, SelectPosition, SelectTributeP,

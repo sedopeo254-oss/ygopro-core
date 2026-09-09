@@ -50,6 +50,52 @@ void test_battle_royale_turn_order_and_skip() {
 	expect(!state.has_winner(), "three active players must not end Battle Royale");
 }
 
+void test_battle_royale_anime_attack_turn_order() {
+    MultiplayerState state;
+    state.configure(MultiplayerMode::BATTLE_ROYALE);
+    const std::array<int32_t, MultiplayerState::MAX_PLAYERS> anime_atk{
+        3300, 1300, 1700, 500
+    };
+    expect(state.set_turn_order_by_attack(anime_atk),
+        "Battle Royale must accept the anime ATK turn-order rule");
+    expect(state.current_player() == 0, "Kaiba 3300 must go first");
+    expect(state.advance_turn() == 2, "Marik 1700 must go second");
+    expect(state.advance_turn() == 1, "Yugi 1300 must go third");
+    expect(state.advance_turn() == 3, "Joey 500 must go last");
+
+    MultiplayerState changed;
+    changed.configure(MultiplayerMode::BATTLE_ROYALE);
+    const std::array<int32_t, MultiplayerState::MAX_PLAYERS> changed_atk{
+        500, 3300, 1300, 1700
+    };
+    expect(changed.set_turn_order_by_attack(changed_atk),
+        "Battle Royale must support any ATK-derived order");
+    expect(changed.current_player() == 1 && changed.advance_turn() == 3
+            && changed.advance_turn() == 2 && changed.advance_turn() == 0,
+        "turn order must be sorted highest ATK to lowest ATK");
+
+    MultiplayerState tied;
+    tied.configure(MultiplayerMode::BATTLE_ROYALE);
+    const std::array<int32_t, MultiplayerState::MAX_PLAYERS> tied_atk{
+        1000, 1000, 1000, 1000
+    };
+    expect(tied.set_turn_order_by_attack(tied_atk),
+        "Battle Royale ties must remain deterministic");
+    expect(tied.current_player() == 0 && tied.advance_turn() == 2
+            && tied.advance_turn() == 1 && tied.advance_turn() == 3,
+        "equal ATK must preserve A1-B1-A2-B2");
+
+    MultiplayerState protected_three_vs_one;
+    protected_three_vs_one.configure(MultiplayerMode::THREE_V_ONE);
+    expect(!protected_three_vs_one.set_turn_order_by_attack(anime_atk),
+        "3v1 must reject Battle Royale turn-order changes");
+    expect(protected_three_vs_one.current_player() == 0
+            && protected_three_vs_one.advance_turn() == 1
+            && protected_three_vs_one.advance_turn() == 2
+            && protected_three_vs_one.advance_turn() == 3,
+        "3v1 order must remain Serenity-Tristan-Duke-Nezbitt");
+}
+
 void test_battle_royale_multi_elimination() {
 	MultiplayerState state;
 	state.configure(MultiplayerMode::BATTLE_ROYALE);
@@ -138,6 +184,7 @@ void test_simultaneous_elimination_draw() {
 
 int main() {
 	test_battle_royale_turn_order_and_skip();
+	test_battle_royale_anime_attack_turn_order();
 	test_battle_royale_multi_elimination();
 	test_three_vs_one_team_winner();
 	test_disabled_state_is_inert();

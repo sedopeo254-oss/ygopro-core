@@ -1,0 +1,43 @@
+name: Battle Royale Anime Turn Order Debug
+on:
+  push:
+    branches: [fix/4way-anime-preduel-turn-order-20260910]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  debug:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: |
+          python3 .github/scripts/apply-battle-royale-anime-turn-order.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/run_multiplayer_field_tests.sh')
+          s=p.read_text()
+          old='''\t"$root_dir/processor.cpp" \\\n\t"$root_dir/processor_visit.cpp" \\\n'''
+          new='''\t"$root_dir/processor.cpp" \\\n\t"$root_dir/battle_royale_turn_order.cpp" \\\n\t"$root_dir/processor_visit.cpp" \\\n'''
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Run tests and capture logs
+        shell: bash
+        run: |
+          set +e
+          sh tests/run_multiplayer_state_tests.sh > state.log 2>&1
+          echo $? > state.rc
+          sh tests/run_multiplayer_field_tests.sh > field.log 2>&1
+          echo $? > field.rc
+          cat state.log
+          cat field.log
+          test "$(cat state.rc)" = 0 -a "$(cat field.rc)" = 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: battle-royale-anime-turn-order-debug-logs
+          path: |
+            state.log
+            state.rc
+            field.log
+            field.rc

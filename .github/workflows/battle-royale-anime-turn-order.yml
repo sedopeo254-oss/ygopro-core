@@ -1,0 +1,82 @@
+name: Battle Royale Anime Pre-Duel Turn Order
+
+on:
+  push:
+    branches:
+      - fix/4way-anime-preduel-turn-order-20260910
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: battle-royale-anime-turn-order-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify protected multiplayer baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor bb0c48e455857156b55a223d1766d416e16dbf10 HEAD
+          grep -Fq 'turn_order = { 0, 1, 2, 3 };' multiplayer.cpp
+          grep -Fq '3 vs 1 must follow Serenity, Tristan, Duke, then Nezbitt' tests/multiplayer_state_tests.cpp
+
+      - name: Apply anime Battle Royale turn-order system
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/apply-battle-royale-anime-turn-order.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/run_multiplayer_field_tests.sh')
+          s=p.read_text()
+          old='''\t"$root_dir/processor.cpp" \\\n\t"$root_dir/processor_visit.cpp" \\\n'''
+          new='''\t"$root_dir/processor.cpp" \\\n\t"$root_dir/battle_royale_turn_order.cpp" \\\n\t"$root_dir/processor_visit.cpp" \\\n'''
+          if s.count(old) != 1:
+              raise SystemExit(f'field-test runner patch site count: {s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+
+      - name: Run multiplayer regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh tests/run_multiplayer_state_tests.sh
+          sh tests/run_multiplayer_field_tests.sh
+
+      - name: Verify exact anime example and 3v1 isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'Kaiba 3300 must go first' tests/multiplayer_state_tests.cpp
+          grep -Fq 'Marik 1700 must go second' tests/multiplayer_state_tests.cpp
+          grep -Fq 'Yugi 1300 must go third' tests/multiplayer_state_tests.cpp
+          grep -Fq 'Joey 500 must go last' tests/multiplayer_state_tests.cpp
+          grep -Fq '3v1 must reject Battle Royale turn-order changes' tests/multiplayer_state_tests.cpp
+          grep -Fq 'multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE' battle_royale_turn_order.cpp
+          grep -Fq 'TYPE_MONSTER' battle_royale_turn_order.cpp
+          grep -Fq 'LOCATION_REMOVED' battle_royale_turn_order.cpp
+          grep -Fq 'POS_FACEUP' battle_royale_turn_order.cpp
+          grep -Fq 'REASON_RULE' battle_royale_turn_order.cpp
+
+      - name: Publish tested Core source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            multiplayer.h multiplayer.cpp processor_unit.h playerop.cpp field.h \
+            processor.cpp battle_royale_turn_order.cpp \
+            tests/multiplayer_state_tests.cpp tests/run_multiplayer_field_tests.sh
+          git commit -m 'Add anime Battle Royale pre-duel ATK turn order [skip ci]'
+          git push origin HEAD:fix/4way-anime-preduel-turn-order-20260910

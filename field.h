@@ -454,6 +454,8 @@ public:
 	int32_t& get_logical_lp(uint8_t playerid, uint8_t duelist);
 	void publish_multiplayer_private_piles(uint8_t logical_player);
 	void publish_all_multiplayer_private_piles();
+	void publish_multiplayer_team_public_piles(uint8_t logical_player);
+	void publish_all_multiplayer_team_public_piles();
 	void publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent);
 	void publish_multiplayer_effect_view(effect* source_effect, card* target);
 	uint8_t get_effect_duelist(uint8_t playerid) const;

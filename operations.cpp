@@ -171,7 +171,8 @@ void field::damage(effect* reason_effect, uint32_t reason, uint8_t reason_player
 				&& playerid == multiplayer.field_side_of(core.attack_target_logical))
 			duelist = multiplayer.duelist_index_of(core.attack_target_logical);
 		else if((reason & REASON_BATTLE) && !core.attack_target
-				&& multiplayer.mode() == MultiplayerMode::THREE_V_ONE && playerid == 0
+				&& (multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+					|| multiplayer.mode() == MultiplayerMode::TWO_V_ONE) && playerid == 0
 				&& core.attack_target_duelist < multiplayer.field_count(0))
 			duelist = core.attack_target_duelist;
 		else if(multiplayer.enabled() && reason_effect) {

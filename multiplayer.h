@@ -13,7 +13,8 @@
 enum class MultiplayerMode : uint8_t {
 	NONE = 0,
 	BATTLE_ROYALE,
-	THREE_V_ONE
+	THREE_V_ONE,
+	TWO_V_ONE
 };
 
 enum class PlayerEliminationReason : uint8_t {

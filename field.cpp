@@ -2237,7 +2237,22 @@ int32_t field::filter_field_card(uint8_t self, uint32_t location1, uint32_t loca
 			});
 		}
 	} else {
-		scopes.push_back({ self, get_effect_duelist(self), location1 });
+		const auto origin_duelist = get_effect_duelist(self);
+		scopes.push_back({ self, origin_duelist, location1 });
+		if(multiplayer.mode() == MultiplayerMode::TWO_V_ONE && self == 0) {
+			// The allied field is shared for gameplay, but private piles are not.
+			// Only public teammate resources are expanded here.
+			const auto shared_locations = location1 & (LOCATION_GRAVE | LOCATION_REMOVED);
+			if(shared_locations) {
+				for(uint8_t duelist = 0; duelist < multiplayer.field_count(0); ++duelist) {
+					if(duelist == origin_duelist)
+						continue;
+					const auto logical = multiplayer.logical_player(0, duelist);
+					if(multiplayer.is_active(logical))
+						scopes.push_back({ 0, duelist, shared_locations });
+				}
+			}
+		}
 		scopes.push_back({ static_cast<uint8_t>(1 - self),
 			get_effect_duelist(static_cast<uint8_t>(1 - self)), location2 });
 	}

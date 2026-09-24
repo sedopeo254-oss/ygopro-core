@@ -168,7 +168,8 @@ uint32_t OCG_DuelEliminatePlayer(OCG_Duel ocg_duel, uint8_t player, uint8_t reas
 		status |= OCG_MULTIPLAYER_ELIMINATION_FINISHED;
 		uint8_t winner = PLAYER_NONE;
 		if(game_field.multiplayer.has_winner()) {
-			winner = game_field.multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+			winner = (game_field.multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+					|| game_field.multiplayer.mode() == MultiplayerMode::TWO_V_ONE)
 				? game_field.multiplayer.winner_team()
 				: game_field.multiplayer.field_side_of(game_field.multiplayer.winner_player());
 		}

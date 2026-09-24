@@ -1452,7 +1452,9 @@ bool field::process(Processors::IdleCommand& arg) {
 		bool must_attack = false;
 		const auto current_duelist = player[infos.turn_player].current_duelist;
 		auto belongs_to_turn_duelist = [&](const card* pcard) {
-			return multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE || !pcard
+			const bool isolate_commands = multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE
+				|| multiplayer.mode() == MultiplayerMode::TWO_V_ONE;
+			return !isolate_commands || !pcard
 				|| pcard->current.controler != infos.turn_player
 				|| pcard->current.duelist == current_duelist;
 		};
@@ -2056,7 +2058,8 @@ bool field::process(Processors::BattleCommand& arg) {
 					core.select_options.push_back(MULTIPLAYER_OPTION_PLAYER_BASE | logical_player);
 				emplace_process<Processors::SelectOption>(infos.turn_player);
 			}
-		} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1) {
+		} else if((multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+				|| multiplayer.mode() == MultiplayerMode::TWO_V_ONE) && infos.turn_player == 1) {
 			arg.attack_target_duelists.clear();
 			for(uint8_t duelist = 0; duelist < multiplayer.field_count(0); ++duelist) {
 				const auto logical_player = multiplayer.logical_player(0, duelist);
@@ -2104,7 +2107,8 @@ bool field::process(Processors::BattleCommand& arg) {
 			}
 			core.attack_target_logical = arg.attack_target_duelists[selected];
 			core.attack_target_duelist = multiplayer.duelist_index_of(core.attack_target_logical);
-		} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE && infos.turn_player == 1
+		} else if((multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+				|| multiplayer.mode() == MultiplayerMode::TWO_V_ONE) && infos.turn_player == 1
 				&& arg.attack_target_duelists.size() > 1) {
 			const auto selected = static_cast<size_t>(returns.at<int32_t>(0));
 			if(selected >= arg.attack_target_duelists.size()) {
@@ -2266,7 +2270,8 @@ bool field::process(Processors::BattleCommand& arg) {
 				core.attack_target_logical = multiplayer.logical_player(
 					core.attack_target->current.controler, core.attack_target->current.duelist);
 				core.attack_target_duelist = core.attack_target->current.duelist;
-			} else if(multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+			} else if((multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+					|| multiplayer.mode() == MultiplayerMode::TWO_V_ONE)
 					&& core.attack_target->current.controler == 0) {
 				core.attack_target_duelist = core.attack_target->current.duelist;
 				core.attack_target_logical = multiplayer.logical_player(
@@ -5012,7 +5017,8 @@ bool field::process(Processors::Adjust& arg) {
 			if(multiplayer.is_finished()) {
 				uint8_t winner = PLAYER_NONE;
 				if(multiplayer.has_winner()) {
-					winner = multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+					winner = (multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+							|| multiplayer.mode() == MultiplayerMode::TWO_V_ONE)
 						? multiplayer.winner_team()
 						: multiplayer.field_side_of(multiplayer.winner_player());
 				}
@@ -5441,7 +5447,12 @@ bool field::process(Processors::Startup& arg) {
 
 			}
 		}
-		emplace_process<Processors::Turn>(0);
+		if(multiplayer.mode() == MultiplayerMode::TWO_V_ONE) {
+			const auto first_logical = multiplayer.current_player();
+			emplace_process<Processors::Turn>(multiplayer.field_side_of(first_logical));
+		} else {
+			emplace_process<Processors::Turn>(0);
+		}
 		return TRUE;
 	}
 	case 2: {

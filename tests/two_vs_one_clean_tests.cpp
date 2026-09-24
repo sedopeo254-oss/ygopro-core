@@ -130,7 +130,7 @@ int main() {
 	p1_grave->owner_duelist = 0;
 	field.add_card(0, p1_grave, LOCATION_GRAVE, 0, false, 0);
 
-	auto* public_group = game.new_group();
+	auto public_group = game.new_group();
 	field.filter_field_card(0, LOCATION_GRAVE | LOCATION_REMOVED, 0, public_group);
 	expect(public_group->container.count(p1_grave) == 1
 			&& public_group->container.count(p2_grave) == 1

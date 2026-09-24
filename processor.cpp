@@ -3618,8 +3618,18 @@ bool field::process(Processors::Turn& arg) {
 				// Publish a fixed snapshot so every client can render the four
 				// independent resource areas even while a pile is not active.
 				for(uint8_t logical = 0; logical < MultiplayerState::MAX_PLAYERS; ++logical) {
+					if(!multiplayer.is_active(logical)) {
+						for(uint8_t value = 0; value < 6; ++value)
+							logical_message->write<uint32_t>(0);
+						continue;
+					}
 					const auto side = multiplayer.field_side_of(logical);
 					const auto duelist = multiplayer.duelist_index_of(logical);
+					if(side > 1 || duelist == MultiplayerState::NO_PLAYER) {
+						for(uint8_t value = 0; value < 6; ++value)
+							logical_message->write<uint32_t>(0);
+						continue;
+					}
 					const auto logical_lp = get_logical_lp(side, duelist);
 					logical_message->write<uint32_t>(logical_lp > 0
 						? static_cast<uint32_t>(logical_lp) : 0u);
@@ -3634,6 +3644,7 @@ bool field::process(Processors::Turn& arg) {
 			// saved piles. The server routes these packets only to that logical
 			// player, so sharing a core side never shares a hand or deck view.
 			publish_all_multiplayer_private_piles();
+			publish_all_multiplayer_team_public_piles();
 			tag_swap_to(turn_player, multiplayer.duelist_index_of(logical_player));
 			// Record an authoritative replay view at the start of every logical
 			// turn while live clients keep their normal manual field controls.

@@ -25,7 +25,9 @@ using namespace scriptlib;
 
 std::pair<uint8_t, uint8_t> GetEffectPlayerMasks(field* game_field, uint8_t playerid,
 		bool include_self, bool include_opponents) {
-	if(game_field->multiplayer.mode() != MultiplayerMode::THREE_V_ONE || playerid > 1)
+	if((game_field->multiplayer.mode() != MultiplayerMode::THREE_V_ONE
+			&& game_field->multiplayer.mode() != MultiplayerMode::TWO_V_ONE)
+			|| playerid > 1)
 		return { 0, 0 };
 	const auto origin_duelist = game_field->get_effect_duelist(playerid);
 	const auto origin = game_field->multiplayer.logical_player(playerid, origin_duelist);
@@ -4544,7 +4546,8 @@ LUA_STATIC_FUNCTION(EliminatePlayer) {
 	if(pduel->game_field->multiplayer.is_finished()) {
 		uint8_t winner = PLAYER_NONE;
 		if(pduel->game_field->multiplayer.has_winner()) {
-			winner = pduel->game_field->multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+			winner = (pduel->game_field->multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+					|| pduel->game_field->multiplayer.mode() == MultiplayerMode::TWO_V_ONE)
 				? pduel->game_field->multiplayer.winner_team()
 				: pduel->game_field->multiplayer.field_side_of(
 					pduel->game_field->multiplayer.winner_player());

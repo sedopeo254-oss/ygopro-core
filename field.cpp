@@ -80,6 +80,14 @@ field::field(duel* _pduel, const OCG_DuelOptions& options) :pduel(_pduel), playe
 		player[0].list_szone.resize(8 * 3, nullptr);
 		player[0].extra_used_location.resize(2, 0);
 		player[0].extra_disabled_location.resize(2, 0);
+	} else if(options.flags & DUEL_2_V_1) {
+		multiplayer.configure(MultiplayerMode::TWO_V_ONE);
+		// P1 and P2 share core side 0 but keep two simultaneous independent
+		// fields. P3 remains the normal single field on core side 1.
+		player[0].list_mzone.resize(7 * 2, nullptr);
+		player[0].list_szone.resize(8 * 2, nullptr);
+		player[0].extra_used_location.resize(1, 0);
+		player[0].extra_disabled_location.resize(1, 0);
 	}
 	nil_event.event_code = 0;
 	nil_event.event_cards = nullptr;
@@ -2073,7 +2081,23 @@ int32_t field::filter_matching_card(int32_t findex, uint8_t self, uint32_t locat
 			});
 		}
 	} else {
-		scopes.push_back({ self, get_effect_duelist(self), location1 });
+		const auto origin_duelist = get_effect_duelist(self);
+		scopes.push_back({ self, origin_duelist, location1 });
+		// In 2 vs 1 the allied fields are already one flattened on-field side.
+		// Only public off-field resources (GY/Banish) are additionally shared;
+		// Hand, Deck and Extra Deck remain private to each logical player.
+		if(multiplayer.mode() == MultiplayerMode::TWO_V_ONE && self == 0) {
+			const auto shared_locations = location1 & (LOCATION_GRAVE | LOCATION_REMOVED);
+			if(shared_locations) {
+				for(uint8_t duelist = 0; duelist < multiplayer.field_count(0); ++duelist) {
+					if(duelist == origin_duelist)
+						continue;
+					const auto logical = multiplayer.logical_player(0, duelist);
+					if(multiplayer.is_active(logical))
+						scopes.push_back({ 0, duelist, shared_locations });
+				}
+			}
+		}
 		scopes.push_back({ static_cast<uint8_t>(1 - self),
 			get_effect_duelist(static_cast<uint8_t>(1 - self)), location2 });
 	}
@@ -2974,7 +2998,8 @@ int32_t field::get_attack_target(card* pcard, card_vector* v, bool chain_attack,
 			return false;
 		if(multiplayer.mode() == MultiplayerMode::BATTLE_ROYALE)
 			return target->current.controler != target_side || target->current.duelist != target_duelist;
-		return multiplayer.mode() == MultiplayerMode::THREE_V_ONE && p == 1
+		return (multiplayer.mode() == MultiplayerMode::THREE_V_ONE
+				|| multiplayer.mode() == MultiplayerMode::TWO_V_ONE) && p == 1
 			&& target_duelist < multiplayer.field_count(0)
 			&& target->current.controler == 0
 			&& target->current.duelist != target_duelist;

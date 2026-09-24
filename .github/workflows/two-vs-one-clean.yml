@@ -1,0 +1,21 @@
+name: Clean 2v1 Core
+
+on:
+  push:
+    branches:
+      - feature/2v1-clean-core-20260924
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Clean 2v1 state tests
+        run: sh tests/run_multiplayer_state_tests.sh
+      - name: Clean 2v1 field integration
+        run: sh tests/run_two_vs_one_clean_tests.sh
+      - name: Protected Battle Royale and 3v1 field tests
+        run: sh tests/run_multiplayer_field_tests.sh

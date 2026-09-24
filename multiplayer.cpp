@@ -23,6 +23,13 @@ void MultiplayerState::configure(MultiplayerMode new_mode) {
 		teams = { 0, 0, 0, 1 };
 		turn_order = { 0, 1, 2, 3 };
 		turn_player = 0;
+	} else if(new_mode == MultiplayerMode::TWO_V_ONE) {
+		// Clean 2 vs 1: P1/P2 are allied and P3 is the solo opponent.
+		// The solo player always opens the round, then P1, then P2.
+		players_mask = 0x07;
+		teams = { 0, 0, 1, NO_TEAM };
+		turn_order = { 2, 0, 1, 3 };
+		turn_player = 2;
 	}
 }
 
@@ -66,7 +73,11 @@ uint8_t MultiplayerState::field_side_of(uint8_t player) const {
 		return NO_PLAYER;
 	if(duel_mode == MultiplayerMode::BATTLE_ROYALE)
 		return player < 2 ? 0 : 1;
-	return player < 3 ? 0 : 1;
+	if(duel_mode == MultiplayerMode::THREE_V_ONE)
+		return player < 3 ? 0 : 1;
+	if(duel_mode == MultiplayerMode::TWO_V_ONE)
+		return player < 2 ? 0 : player == 2 ? 1 : NO_PLAYER;
+	return NO_PLAYER;
 }
 
 uint8_t MultiplayerState::field_count(uint8_t field_side) const {
@@ -74,6 +85,8 @@ uint8_t MultiplayerState::field_count(uint8_t field_side) const {
 		return 0;
 	if(duel_mode == MultiplayerMode::THREE_V_ONE)
 		return field_side == 0 ? 3 : 1;
+	if(duel_mode == MultiplayerMode::TWO_V_ONE)
+		return field_side == 0 ? 2 : 1;
 	if(duel_mode == MultiplayerMode::BATTLE_ROYALE)
 		return 2;
 	return 1;
@@ -84,7 +97,11 @@ uint8_t MultiplayerState::duelist_index_of(uint8_t player) const {
 		return NO_PLAYER;
 	if(duel_mode == MultiplayerMode::BATTLE_ROYALE)
 		return player & 1u;
-	return player < 3 ? player : 0;
+	if(duel_mode == MultiplayerMode::THREE_V_ONE)
+		return player < 3 ? player : 0;
+	if(duel_mode == MultiplayerMode::TWO_V_ONE)
+		return player < 2 ? player : player == 2 ? 0 : NO_PLAYER;
+	return NO_PLAYER;
 }
 
 uint8_t MultiplayerState::logical_player(uint8_t field_side, uint8_t duelist_index) const {
@@ -95,9 +112,17 @@ uint8_t MultiplayerState::logical_player(uint8_t field_side, uint8_t duelist_ind
 			return NO_PLAYER;
 		return static_cast<uint8_t>((field_side ? 2 : 0) + duelist_index);
 	}
-	if(field_side == 0)
-		return duelist_index < 3 ? duelist_index : NO_PLAYER;
-	return duelist_index == 0 ? 3 : NO_PLAYER;
+	if(duel_mode == MultiplayerMode::THREE_V_ONE) {
+		if(field_side == 0)
+			return duelist_index < 3 ? duelist_index : NO_PLAYER;
+		return duelist_index == 0 ? 3 : NO_PLAYER;
+	}
+	if(duel_mode == MultiplayerMode::TWO_V_ONE) {
+		if(field_side == 0)
+			return duelist_index < 2 ? duelist_index : NO_PLAYER;
+		return duelist_index == 0 ? 2 : NO_PLAYER;
+	}
+	return NO_PLAYER;
 }
 
 uint8_t MultiplayerState::prompt_player_of(uint8_t player) const {
@@ -106,6 +131,8 @@ uint8_t MultiplayerState::prompt_player_of(uint8_t player) const {
 	if(duel_mode == MultiplayerMode::BATTLE_ROYALE)
 		return static_cast<uint8_t>(player + 2);
 	if(duel_mode == MultiplayerMode::THREE_V_ONE && player < 3)
+		return static_cast<uint8_t>(player + 2);
+	if(duel_mode == MultiplayerMode::TWO_V_ONE && player < 2)
 		return static_cast<uint8_t>(player + 2);
 	return field_side_of(player);
 }
@@ -257,15 +284,19 @@ void MultiplayerState::update_winner() {
 		}
 		return;
 	}
-	if(duel_mode == MultiplayerMode::THREE_V_ONE) {
+	if(duel_mode == MultiplayerMode::THREE_V_ONE
+			|| duel_mode == MultiplayerMode::TWO_V_ONE) {
 		const uint8_t team_mask = active_teams_mask();
 		if(team_mask == 0 || count_bits(team_mask) != 1)
 			return;
 		for(uint8_t team = 0; team < MAX_PLAYERS; ++team) {
 			if(team_mask & (1u << team)) {
 				winning_team = team;
-				if(team == 1 && is_active(3))
-					winning_player = 3;
+				if(team == 1) {
+					const auto solo = duel_mode == MultiplayerMode::THREE_V_ONE ? 3u : 2u;
+					if(is_active(static_cast<uint8_t>(solo)))
+						winning_player = static_cast<uint8_t>(solo);
+				}
 				return;
 			}
 		}

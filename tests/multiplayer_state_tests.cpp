@@ -155,6 +155,63 @@ void test_three_vs_one_team_winner() {
 		"a team victory must not invent an individual winner");
 }
 
+
+void test_two_vs_one_clean_state() {
+	MultiplayerState state;
+	state.configure(MultiplayerMode::TWO_V_ONE);
+	expect(state.active_mask() == 0x07,
+		"2 vs 1 must expose exactly three active logical players");
+	expect(state.team_of(0) == 0 && state.team_of(1) == 0,
+		"P1 and P2 must be allied");
+	expect(state.team_of(2) == 1,
+		"P3 must be the solo opponent");
+	expect(state.current_player() == 2,
+		"the solo opponent must take the first turn");
+	expect(state.advance_turn() == 0,
+		"P1 must act after the solo opponent");
+	expect(state.advance_turn() == 1,
+		"P2 must act after P1");
+	expect(state.advance_turn() == 2,
+		"the 2 vs 1 order must repeat P3 -> P1 -> P2");
+	expect(state.field_side_of(0) == 0 && state.field_side_of(1) == 0
+			&& state.field_side_of(2) == 1,
+		"the allied players must share only the core side, not their logical field");
+	expect(state.field_count(0) == 2 && state.field_count(1) == 1,
+		"2 vs 1 must allocate two allied fields and one solo field");
+	expect(state.encode_zone_sequence(0, 0, 7, 4) == 4
+			&& state.encode_zone_sequence(0, 1, 7, 4) == 11,
+		"P1 and P2 must have distinct internal monster zones");
+	expect(state.local_zone_sequence(0, 7, 11) == 4
+			&& state.zone_duelist_index(0, 7, 11) == 1,
+		"the encoded P2 field must decode independently");
+	expect(state.logical_player(0, 0) == 0
+			&& state.logical_player(0, 1) == 1
+			&& state.logical_player(1, 0) == 2,
+		"logical-player mapping must be P1/P2 on side 0 and P3 on side 1");
+	expect(state.prompt_player_of(0) == 2 && state.prompt_player_of(1) == 3
+			&& state.prompt_player_of(2) == 1,
+		"allied prompts must route independently while P3 uses the solo side");
+
+	expect(state.eliminate(0, PlayerEliminationReason::LP),
+		"P1 elimination must succeed");
+	expect(!state.has_winner(),
+		"P2 must keep the allied team alive");
+	expect(state.eliminate(1, PlayerEliminationReason::LP),
+		"P2 elimination must succeed");
+	expect(state.has_winner() && state.winner_team() == 1
+			&& state.winner_player() == 2,
+		"P3 must win only after both allied players are eliminated");
+
+	MultiplayerState allied_win;
+	allied_win.configure(MultiplayerMode::TWO_V_ONE);
+	expect(allied_win.eliminate(2, PlayerEliminationReason::LP),
+		"P3 elimination must succeed");
+	expect(allied_win.has_winner() && allied_win.winner_team() == 0,
+		"the allied team must win when P3 is eliminated");
+	expect(allied_win.winner_player() == MultiplayerState::NO_PLAYER,
+		"a two-player team victory must not invent an individual winner");
+}
+
 void test_disabled_state_is_inert() {
 	MultiplayerState state;
 	expect(!state.enabled(), "the default state must be disabled");
@@ -187,6 +244,7 @@ int main() {
 	test_battle_royale_anime_attack_turn_order();
 	test_battle_royale_multi_elimination();
 	test_three_vs_one_team_winner();
+	test_two_vs_one_clean_state();
 	test_disabled_state_is_inert();
 	test_simultaneous_elimination_draw();
 	std::cout << "All multiplayer state tests passed.\n";

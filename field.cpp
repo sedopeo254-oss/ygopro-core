@@ -238,6 +238,36 @@ void field::publish_all_multiplayer_private_piles() {
 		publish_multiplayer_private_piles(logical_player);
 }
 
+void field::publish_multiplayer_team_public_piles(uint8_t logical_player) {
+	if(multiplayer.mode() != MultiplayerMode::TWO_V_ONE
+			|| !multiplayer.is_active(logical_player))
+		return;
+	const auto side = multiplayer.field_side_of(logical_player);
+	const auto duelist = multiplayer.duelist_index_of(logical_player);
+	if(side > 1 || duelist == MultiplayerState::NO_PLAYER)
+		return;
+	const auto& grave = get_logical_list(side, LOCATION_GRAVE, duelist);
+	const auto& removed = get_logical_list(side, LOCATION_REMOVED, duelist);
+	auto message = pduel->new_message(MSG_MULTIPLAYER_TEAM_PUBLIC_PILES);
+	message->write<uint8_t>(logical_player);
+	message->write<uint32_t>(grave.size());
+	message->write<uint32_t>(removed.size());
+	for(const auto& pcard : grave) {
+		message->write<uint32_t>(pcard->data.code);
+		message->write<uint32_t>(pcard->current.position);
+	}
+	for(const auto& pcard : removed) {
+		message->write<uint32_t>(pcard->data.code);
+		message->write<uint32_t>(pcard->current.position);
+	}
+}
+void field::publish_all_multiplayer_team_public_piles() {
+	if(multiplayer.mode() != MultiplayerMode::TWO_V_ONE)
+		return;
+	for(uint8_t logical_player = 0; logical_player < MultiplayerState::MAX_PLAYERS; ++logical_player)
+		publish_multiplayer_team_public_piles(logical_player);
+}
+
 void field::publish_multiplayer_replay_view(uint8_t primary, uint8_t opponent) {
 	if(!multiplayer.enabled()
 			|| primary >= MultiplayerState::MAX_PLAYERS

@@ -3644,7 +3644,8 @@ bool field::process(Processors::Turn& arg) {
 		}
 		auto message = pduel->new_message(MSG_NEW_TURN);
 		message->write<uint8_t>(turn_player);
-		if(!multiplayer.enabled() && !is_flag(DUEL_RELAY) && infos.turn_id != 1)
+		if(!multiplayer.enabled() && !is_flag(DUEL_RELAY)
+				&& !is_flag(DUEL_INHERITED_DUEL) && infos.turn_id != 1)
 			tag_swap(turn_player);
 		if(is_player_affected_by_effect(infos.turn_player, EFFECT_SKIP_TURN)) {
 			arg.step = 18;
@@ -5427,6 +5428,9 @@ bool field::process(Processors::Startup& arg) {
 				draw(nullptr, REASON_RULE, PLAYER_NONE, p, player[p].start_count);
 			auto list_size = player[p].extra_lists_main.size();
 			for(size_t l = 0; l < list_size; l++) {
+				// In Inherited Duel, Yugi's undeployed deck has no opening hand.
+				if(is_flag(DUEL_INHERITED_DUEL) && p == 0)
+					continue;
 				auto& main = player[p].extra_lists_main[l];
 				auto& hand = player[p].extra_lists_hand[l];
 				for(int i = 0; i < player[p].start_count && !main.empty(); ++i) {

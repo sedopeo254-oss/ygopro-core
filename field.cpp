@@ -1455,8 +1455,8 @@ bool field::commit_inherited_duel_succession(uint32_t next_turn) {
 	std::unordered_set<const card*> existing;
 	auto remember = [&existing](const card_vector& cards) {
 		for(const auto* pcard : cards) {
-			if(pcard && !existing.insert(pcard).second)
-				return false;
+			if(pcard)
+				existing.insert(pcard); // Shared EMZ may reference same card twice.
 		}
 		return true;
 	};

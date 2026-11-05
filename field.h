@@ -434,6 +434,8 @@ public:
 	explicit field(duel* pduel, const OCG_DuelOptions& options);
 	~field() = default;
 	void reload_field_info();
+	// One-time atomic transfer of the preloaded successor deck into a live 1v1.
+	bool commit_inherited_duel_succession(uint32_t next_turn);
 	bool eliminate_multiplayer_player(uint8_t playerid, PlayerEliminationReason reason);
 	uint8_t eliminate_multiplayer_players(uint8_t player_mask,
 		const std::array<PlayerEliminationReason, MultiplayerState::MAX_PLAYERS>& reasons);

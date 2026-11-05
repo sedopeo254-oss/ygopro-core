@@ -484,6 +484,8 @@ public:
 	void reverse_deck(uint8_t playerid);
 	int get_player_count(uint8_t playerid);
 	void tag_swap(uint8_t playerid);
+	// One-shot Noah/Kaiba->Yugi takeover. Never called in other duel modes.
+	bool complete_inherited_succession();
 	bool tag_swap_to(uint8_t playerid, uint8_t duelist);
 	bool relay_check(uint8_t playerid);
 	void next_player(uint8_t playerid);

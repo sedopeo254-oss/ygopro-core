@@ -63,8 +63,9 @@ public:
 			return reject(SuccessionPreflightError::CAPACITY_EXCEEDED);
 		std::unordered_set<uint64_t> seen;
 		for(const auto& card : existing_duel) {
-			if(!card.instance_id || !card.card_code)
+			if(!card.instance_id)
 				return reject(SuccessionPreflightError::INVALID_IDENTITY);
+			// Existing tokens are allowed to have an internal zero card code.
 			if(card.owner_side > 1)
 				return reject(SuccessionPreflightError::FOREIGN_SIDE);
 			if(!seen.insert(card.instance_id).second)

@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Test Duel Succession System state
         run: sh tests/run_duel_succession_tests.sh
+      - name: Test succession card transfer preflight
+        run: sh tests/run_duel_succession_transfer_tests.sh
       - name: Regression - Battle Royale and 3v1
         run: sh tests/run_multiplayer_state_tests.sh
       - name: Regression - field ownership and multiplayer

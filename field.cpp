@@ -66,6 +66,10 @@ bool tevent::operator< (const tevent& rhs) const {
 }
 field::field(duel* _pduel, const OCG_DuelOptions& options) :pduel(_pduel), player({ {options.team1, options.team2} }) {
 	core.duel_options = options.flags;
+	// Inherited Duel preserves exactly two normal field sides. It is intentionally
+	// independent of 3v1 and Battle Royale and does not change core win logic yet.
+	succession.configure((options.flags & DUEL_INHERITED_DUEL) != 0
+		&& (options.flags & (DUEL_BATTLE_ROYALE | DUEL_3_V_1)) == 0, 0);
 	if(options.flags & DUEL_BATTLE_ROYALE) {
 		multiplayer.configure(MultiplayerMode::BATTLE_ROYALE);
 		for(uint8_t side = 0; side < 2; ++side) {

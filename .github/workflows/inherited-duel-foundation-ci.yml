@@ -1,0 +1,23 @@
+name: Inherited Duel Mode - Foundation Tests
+
+on:
+  push:
+    branches:
+      - feature/inherited-duel-succession-v1-20261105
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  succession-and-legacy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Duel Succession System state
+        run: sh tests/run_duel_succession_tests.sh
+      - name: Regression - Battle Royale and 3v1
+        run: sh tests/run_multiplayer_state_tests.sh
+      - name: Regression - field ownership and multiplayer
+        run: sh tests/run_multiplayer_field_tests.sh

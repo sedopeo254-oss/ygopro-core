@@ -3604,6 +3604,20 @@ bool field::process(Processors::Turn& arg) {
 		++infos.turn_id;
 		++infos.turn_id_by_player[turn_player];
 		infos.turn_player = turn_player;
+		if(succession.phase() == DuelSuccessionPhase::AWAITING_SUCCESSOR) {
+			// Last Turn is over. Commit before the successor's Draw Phase,
+			// keeping the existing fields, GY, banish, LP and Deck Master.
+			if(!commit_inherited_duel_succession(infos.turn_id)) {
+				// No half-transfer: fall back to Noah's original Last Turn win
+				// if the successor was not fully ready.
+				auto win = pduel->new_message(MSG_WIN);
+				win->write<uint8_t>(1);
+				win->write<uint8_t>(0x16); // WIN_REASON_LAST_TURN
+				core.win_player = 5;
+				core.win_reason = 0;
+				return TRUE;
+			}
+		}
 		if(multiplayer.enabled()) {
 			const auto logical_player = multiplayer.current_player();
 			auto logical_message = pduel->new_message(MSG_MULTIPLAYER_NEW_TURN);
@@ -3644,7 +3658,8 @@ bool field::process(Processors::Turn& arg) {
 		}
 		auto message = pduel->new_message(MSG_NEW_TURN);
 		message->write<uint8_t>(turn_player);
-		if(!multiplayer.enabled() && !is_flag(DUEL_RELAY) && infos.turn_id != 1)
+		if(!multiplayer.enabled() && !succession.enabled()
+				&& !is_flag(DUEL_RELAY) && infos.turn_id != 1)
 			tag_swap(turn_player);
 		if(is_player_affected_by_effect(infos.turn_player, EFFECT_SKIP_TURN)) {
 			arg.step = 18;

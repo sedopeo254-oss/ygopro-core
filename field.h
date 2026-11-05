@@ -23,6 +23,7 @@
 #include "lua_obj.h"
 #include "processor_unit.h"
 #include "multiplayer.h"
+#include "duel_succession.h"
 #include "progressivebuffer.h"
 
 class duel;
@@ -410,6 +411,7 @@ public:
 	duel* pduel;
 	std::array<player_info,2> player;
 	MultiplayerState multiplayer;
+	DuelSuccessionState succession;
 	uint8_t last_replay_view_primary{ MultiplayerState::NO_PLAYER };
 	uint8_t last_replay_view_opponent{ MultiplayerState::NO_PLAYER };
 	card* temp_card;

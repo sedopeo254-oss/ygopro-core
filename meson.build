@@ -16,7 +16,7 @@ ocgcore_src = files([
 	'duel.cpp',
 	'effect.cpp',
 	'field.cpp',
-	'group.cpp',
+	'battle_royale_turn_order.cpp',
 	'interpreter.cpp',
 	'libcard.cpp',
 	'libdebug.cpp',

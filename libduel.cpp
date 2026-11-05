@@ -1283,6 +1283,18 @@ LUA_STATIC_FUNCTION(Win) {
 		else if (pduel->game_field->is_player_affected_by_effect(1, EFFECT_CANNOT_LOSE_EFFECT))
 			playerid = 1;
 	}
+	// Last Turn (0x16) is a preliminary result ONLY for an explicitly
+	// enabled Inherited Duel with a reserved successor. All other wins,
+	// including all other modes and Last Turn victories, remain unchanged.
+	if(playerid == 1 && reason == 0x16
+			&& pduel->game_field->succession.phase() == DuelSuccessionPhase::PRIMARY) {
+		auto& field = *pduel->game_field;
+		if(field.succession.request(0, 1, field.infos.turn_id)) {
+			if(field.complete_inherited_succession())
+				return 0;
+			field.succession.cancel(); // Invalid successor: use normal win.
+		}
+	}
 	if (pduel->game_field->core.win_player == 5) {
 		pduel->game_field->core.win_player = playerid;
 		pduel->game_field->core.win_reason = reason;

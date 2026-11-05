@@ -4634,6 +4634,10 @@ LUA_STATIC_FUNCTION(TagSwap) {
 	auto playerid = lua_get<uint8_t>(L, 1);
 	if (playerid != 0 && playerid != 1)
 		return 0;
+	// Inherited Duel is never Tag Duel: prevent a card script from replacing
+	// Kaiba's live piles with the successor's inactive ones.
+	if(pduel->game_field->succession.enabled())
+		return 0;
 	pduel->game_field->tag_swap(playerid);
 	return yield();
 }

@@ -1430,6 +1430,98 @@ void field::reverse_deck(uint8_t playerid) {
 int field::get_player_count(uint8_t playerid) {
 	return static_cast<int>(player[playerid].extra_lists_main.size() + 1);
 }
+// Inherited Duel is not Tag/Relay. The successor's Deck and Extra Deck were
+// preloaded as inactive duel member #1 at duel creation. Preserve the original
+// player's hand, LP, Monster/Spell zones, GY, banish and Deck Master in place.
+bool field::commit_inherited_duel_succession(uint32_t next_turn) {
+	if(succession.phase() != DuelSuccessionPhase::AWAITING_SUCCESSOR
+			|| succession.inherited_side() != 0
+			|| next_turn <= succession.defeat_turn()
+			|| multiplayer.enabled())
+		return false;
+	auto& side = player[0];
+	if(side.extra_lists_main.size() != 1 || side.extra_lists_extra.size() != 1
+			|| side.extra_lists_hand.size() != 1
+			|| !side.extra_lists_hand[0].empty()
+			|| side.extra_lists_main[0].empty())
+		return false;
+
+	auto& incoming_deck = side.extra_lists_main[0];
+	auto& incoming_extra = side.extra_lists_extra[0];
+	if(incoming_deck.size() + incoming_extra.size() > 512)
+		return false;
+	// Validate every existing card object and the incoming objects before any
+	// mutation. The same code on two different cards is perfectly valid.
+	std::unordered_set<const card*> existing;
+	auto remember = [&existing](const card_vector& cards) {
+		for(const auto* pcard : cards) {
+			if(pcard && !existing.insert(pcard).second)
+				return false;
+		}
+		return true;
+	};
+	for(const auto& present : player) {
+		if(!remember(present.list_main) || !remember(present.list_extra)
+				|| !remember(present.list_hand) || !remember(present.list_grave)
+				|| !remember(present.list_remove) || !remember(present.list_mzone)
+				|| !remember(present.list_szone))
+			return false;
+	}
+	std::unordered_set<const card*> incoming;
+	auto validate = [&existing, &incoming](const card_vector& cards, uint8_t loc) {
+		for(const auto* pcard : cards) {
+			if(!pcard || pcard->owner != 0 || pcard->current.controler != 0
+					|| pcard->current.location != loc
+					|| existing.count(pcard) || !incoming.insert(pcard).second)
+				return false;
+		}
+		return true;
+	};
+	if(!validate(incoming_deck, LOCATION_DECK)
+			|| !validate(incoming_extra, LOCATION_EXTRA))
+		return false;
+
+	// No new card object is created here; we adopt the original card pointers.
+	side.list_main.insert(side.list_main.end(), incoming_deck.begin(), incoming_deck.end());
+	side.list_extra.insert(side.list_extra.end() - side.extra_p_count,
+		incoming_extra.begin(), incoming_extra.end());
+	for(auto* pcard : incoming) {
+		// The physical owner remains side 0. The previous virtual slot is
+		// retired so subsequent moves use the ordinary live Deck/Extra piles.
+		auto* adopted = const_cast<card*>(pcard);
+		adopted->owner_duelist = 0;
+		adopted->current.duelist = 0;
+		adopted->apply_field_effect();
+		adopted->enable_field_effect(true);
+	}
+	incoming_deck.clear();
+	incoming_extra.clear();
+	side.extra_lists_main.clear();
+	side.extra_lists_hand.clear();
+	side.extra_lists_extra.clear();
+	side.extra_lists_grave.clear();
+	side.extra_lists_remove.clear();
+	side.extra_extra_p_count.clear();
+	side.extra_used_location.clear();
+	side.extra_disabled_location.clear();
+	side.extra_duelist_ids.clear();
+	side.extra_lps.clear();
+	side.tag_index = 0;
+	side.exchanges = 0;
+	side.current_duelist = 0;
+	reset_sequence(0, LOCATION_DECK);
+	reset_sequence(0, LOCATION_EXTRA);
+	shuffle(0, LOCATION_DECK);
+	if(!succession.commit(next_turn, true, true))
+		return false;
+	auto message = pduel->new_message(MSG_DUEL_SUCCESSION);
+	message->write<uint8_t>(0); // The inherited field remains physical side 0.
+	message->write<uint8_t>(succession.controller_generation());
+	message->write<uint32_t>(succession.defeat_turn());
+	message->write<uint32_t>(succession.resume_turn());
+	return true;
+}
+
 void field::tag_swap(uint8_t playerid) {
 	if(player[playerid].extra_lists_main.empty())
 		return;

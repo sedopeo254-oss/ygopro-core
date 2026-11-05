@@ -1283,6 +1283,27 @@ LUA_STATIC_FUNCTION(Win) {
 		else if (pduel->game_field->is_player_affected_by_effect(1, EFFECT_CANNOT_LOSE_EFFECT))
 			playerid = 1;
 	}
+	// Anime Inherited Duel: Noah's Last Turn victory defeats Kaiba only.
+	// The duel itself stays alive for Yugi. Never intercept unrelated wins,
+	// or any match after succession has already happened.
+	// WIN_REASON_LAST_TURN == 0x16 in the EDOPro rule constants.
+	auto& inherited_field = *pduel->game_field;
+	if(inherited_field.succession.enabled()
+			&& playerid == 1 && reason == 0x16) {
+		if(inherited_field.succession.phase() ==
+				DuelSuccessionPhase::AWAITING_SUCCESSOR)
+			return 0; // Duplicate Last Turn win events in the same chain.
+		if(inherited_field.succession.phase() == DuelSuccessionPhase::PRIMARY
+				&& inherited_field.player[0].extra_lists_main.size() == 1
+				&& !inherited_field.player[0].extra_lists_main[0].empty()
+				&& inherited_field.succession.request(0, 1,
+					inherited_field.infos.turn_id)) {
+			// Leave the current chain to resolve fully, then advance to the
+			// next Draw Phase. Do not emit a terminal MSG_WIN for Kaiba.
+			inherited_field.core.force_turn_end = true;
+			return 0;
+		}
+	}
 	if (pduel->game_field->core.win_player == 5) {
 		pduel->game_field->core.win_player = playerid;
 		pduel->game_field->core.win_reason = reason;

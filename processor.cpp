@@ -5428,8 +5428,9 @@ bool field::process(Processors::Startup& arg) {
 				draw(nullptr, REASON_RULE, PLAYER_NONE, p, player[p].start_count);
 			auto list_size = player[p].extra_lists_main.size();
 			for(size_t l = 0; l < list_size; l++) {
-				// In Inherited Duel, Yugi's undeployed deck has no opening hand.
-				if(is_flag(DUEL_INHERITED_DUEL) && p == 0)
+				// Both standby successors (Yugi and second-stage Noah) keep their
+				// undeployed Deck/Extra intact; neither draws an opening hand.
+				if(is_flag(DUEL_INHERITED_DUEL))
 					continue;
 				auto& main = player[p].extra_lists_main[l];
 				auto& hand = player[p].extra_lists_hand[l];

@@ -1433,112 +1433,135 @@ int field::get_player_count(uint8_t playerid) {
 }
 
 bool field::complete_inherited_succession() {
-	// Only the reserved 2v1-seat / single-field mode can consume Yugi's deck.
-	// All other modes keep their original field, turn, win and Tag logic.
+	// Exactly two reserved successors: Yugi (side 0, duelist 1) and
+	// second-stage Noah (side 1, duelist 1). They inherit the same two
+	// physical fields, LP, Hand, Graveyard, Deck Master and turn number.
 	if(!is_flag(DUEL_INHERITED_DUEL) || multiplayer.enabled()
 			|| succession.phase() != DuelSuccessionPhase::AWAITING_SUCCESSOR
 			|| succession.inherited_side() != 0
 			|| infos.turn_id <= 0
 			|| static_cast<uint32_t>(infos.turn_id) != succession.defeat_turn())
 		return false;
-	auto& inherited = player[0];
-	if(inherited.extra_lists_main.size() != 1
-			|| inherited.extra_lists_extra.size() != 1
-			|| inherited.extra_lists_hand.size() != 1
-			|| !inherited.extra_lists_hand[0].empty()
-			|| inherited.extra_lists_main[0].empty())
-		return false;
-	auto& incoming_deck = inherited.extra_lists_main[0];
-	auto& incoming_extra = inherited.extra_lists_extra[0];
-	for(auto* c : incoming_deck)
-		if(!c || c->owner != 0 || c->owner_duelist != 1
-				|| c->current.location != LOCATION_DECK)
+	for(uint8_t side = 0; side < 2; ++side) {
+		const auto& state = player[side];
+		if(state.extra_lists_main.size() != 1
+				|| state.extra_lists_extra.size() != 1
+				|| state.extra_lists_hand.size() != 1
+				|| !state.extra_lists_hand[0].empty()
+				|| state.extra_lists_main[0].empty())
 			return false;
-	for(auto* c : incoming_extra)
-		if(!c || c->owner != 0 || c->owner_duelist != 1
-				|| c->current.location != LOCATION_EXTRA)
-			return false;
+		for(auto* card : state.extra_lists_main[0])
+			if(!card || card->owner != side || card->owner_duelist != 1
+					|| card->current.location != LOCATION_DECK)
+				return false;
+		for(auto* card : state.extra_lists_extra[0])
+			if(!card || card->owner != side || card->owner_duelist != 1
+					|| card->current.location != LOCATION_EXTRA)
+				return false;
+	}
 
-	// Scan all *existing* physical cards. A card code may repeat legitimately,
-	// but the same in-memory card object cannot appear in two different piles.
+	// Validate the entire four-seat duel before moving ANY card; duplicated
+	// card objects across the two successor pools are also forbidden.
 	std::vector<SuccessionCardIdentity> existing;
-	std::vector<SuccessionCardIdentity> imports;
-	auto identity = [](card* c, SuccessionCardZone zone) {
+	std::array<std::vector<SuccessionCardIdentity>, 2> imports;
+	auto identity = [](card* card, SuccessionCardZone zone) {
 		return SuccessionCardIdentity{
-			static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(c)),
-			c->data.code, c->owner, zone
+			static_cast<uint64_t>(reinterpret_cast<std::uintptr_t>(card)),
+			card->data.code, card->owner, zone
 		};
 	};
 	auto collect = [&](const card_vector& cards, SuccessionCardZone zone) {
-		for(auto* c : cards)
-			if(c)
-				existing.push_back(identity(c, zone));
+		for(auto* card : cards)
+			if(card)
+				existing.push_back(identity(card, zone));
 	};
-	for(const auto& side : player) {
-		collect(side.list_main, SuccessionCardZone::DECK);
-		collect(side.list_hand, SuccessionCardZone::HAND);
-		collect(side.list_extra, SuccessionCardZone::EXTRA);
-		collect(side.list_grave, SuccessionCardZone::GRAVE);
-		collect(side.list_remove, SuccessionCardZone::BANISHED);
-		collect(side.list_mzone, SuccessionCardZone::MONSTER);
-		collect(side.list_szone, SuccessionCardZone::SPELL_TRAP);
+	for(const auto& state : player) {
+		collect(state.list_main, SuccessionCardZone::DECK);
+		collect(state.list_hand, SuccessionCardZone::HAND);
+		collect(state.list_extra, SuccessionCardZone::EXTRA);
+		collect(state.list_grave, SuccessionCardZone::GRAVE);
+		collect(state.list_remove, SuccessionCardZone::BANISHED);
+		collect(state.list_mzone, SuccessionCardZone::MONSTER);
+		collect(state.list_szone, SuccessionCardZone::SPELL_TRAP);
 	}
-	for(auto* c : incoming_deck)
-		imports.push_back(identity(c, SuccessionCardZone::DECK));
-	for(auto* c : incoming_extra)
-		imports.push_back(identity(c, SuccessionCardZone::EXTRA));
-	const auto plan = DuelSuccessionTransfer::preflight(0, existing, imports);
-	if(!plan.valid() || plan.imported_deck.size() != incoming_deck.size()
-			|| plan.imported_extra.size() != incoming_extra.size())
-		return false;
+	for(uint8_t side = 0; side < 2; ++side) {
+		for(auto* card : player[side].extra_lists_main[0])
+			imports[side].push_back(identity(card, SuccessionCardZone::DECK));
+		for(auto* card : player[side].extra_lists_extra[0])
+			imports[side].push_back(identity(card, SuccessionCardZone::EXTRA));
+	}
+	for(uint8_t side = 0; side < 2; ++side) {
+		auto all_existing = existing;
+		all_existing.insert(all_existing.end(), imports[1 - side].begin(),
+			imports[1 - side].end());
+		const auto plan = DuelSuccessionTransfer::preflight(
+			side, all_existing, imports[side]);
+		if(!plan.valid() || plan.imported_count() != imports[side].size())
+			return false;
+	}
 
-	// Reserve before mutation: no card is duplicated or drawn as a fresh hand.
-	inherited.list_main.reserve(inherited.list_main.size() + incoming_deck.size());
-	inherited.list_extra.reserve(inherited.list_extra.size() + incoming_extra.size());
-	auto merge = [](card_vector& destination, card_vector& source) {
-		for(auto* c : source) {
-			c->owner_duelist = 0;
-			c->current.duelist = 0;
-			c->current.controler = 0;
-			c->current.sequence = static_cast<uint32_t>(destination.size());
-			destination.push_back(c);
-			c->apply_field_effect();
-			c->enable_field_effect(true);
-		}
-		source.clear();
-	};
-	merge(inherited.list_main, incoming_deck);
-	merge(inherited.list_extra, incoming_extra);
-	// Keep Kaiba's hand, field, Graveyard, banished cards, current LP,
-	// Kaiser Sea Horse and every effect. Noah's state remains untouched.
-	shuffle(0, LOCATION_DECK);
+	// All four sets of reserved vectors are validated before either is
+	// mutated. Both second-stage players supply only undeployed Deck/Extra.
+	for(uint8_t side = 0; side < 2; ++side) {
+		auto& state = player[side];
+		state.list_main.reserve(state.list_main.size() +
+			state.extra_lists_main[0].size());
+		state.list_extra.reserve(state.list_extra.size() +
+			state.extra_lists_extra[0].size());
+	}
+	for(uint8_t side = 0; side < 2; ++side) {
+		auto& state = player[side];
+		auto merge = [side](card_vector& destination, card_vector& source) {
+			for(auto* card : source) {
+				card->owner_duelist = 0;
+				card->current.duelist = 0;
+				card->current.controler = side;
+				card->current.sequence = static_cast<uint32_t>(destination.size());
+				destination.push_back(card);
+				card->apply_field_effect();
+				card->enable_field_effect(true);
+			}
+			source.clear();
+		};
+		merge(state.list_main, state.extra_lists_main[0]);
+		merge(state.list_extra, state.extra_lists_extra[0]);
+		shuffle(side, LOCATION_DECK);
+	}
 	if(!succession.commit(succession.defeat_turn() + 1, true, true))
 		return false;
 
-	// Reuse EDOPro's proven Tag handoff protocol to switch the *person*
-	// on Kaiba's seat without swapping any cards/fields/LP.
-	auto tag = pduel->new_message(MSG_TAG_SWAP);
-	tag->write<uint8_t>(0);
-	tag->write<uint32_t>(inherited.list_main.size());
-	tag->write<uint32_t>(inherited.list_extra.size());
-	tag->write<uint32_t>(inherited.extra_p_count);
-	tag->write<uint32_t>(inherited.list_hand.size());
-	tag->write<uint32_t>(core.deck_reversed && !inherited.list_main.empty()
-		? inherited.list_main.back()->data.code : 0);
-	for(auto* c : inherited.list_hand) {
-		tag->write<uint32_t>(c->data.code);
-		tag->write<uint32_t>(c->current.position);
+	// One Tag notification per physical side: the server transfers private
+	// response/hand authorization independently, but neither side swaps its
+	// field or loses existing LP, GY, Deck Master, or currently held cards.
+	// Deliver both Tag messages before succession HUD notifications.
+	for(uint8_t side = 0; side < 2; ++side) {
+		const auto& state = player[side];
+		auto tag = pduel->new_message(MSG_TAG_SWAP);
+		tag->write<uint8_t>(side);
+		tag->write<uint32_t>(state.list_main.size());
+		tag->write<uint32_t>(state.list_extra.size());
+		tag->write<uint32_t>(state.extra_p_count);
+		tag->write<uint32_t>(state.list_hand.size());
+		tag->write<uint32_t>(core.deck_reversed && !state.list_main.empty()
+			? state.list_main.back()->data.code : 0);
+		for(auto* card : state.list_hand) {
+			tag->write<uint32_t>(card->data.code);
+			tag->write<uint32_t>(card->current.position);
+		}
+		for(auto* card : state.list_extra) {
+			tag->write<uint32_t>(card->data.code);
+			tag->write<uint32_t>(card->current.position);
+		}
 	}
-	for(auto* c : inherited.list_extra) {
-		tag->write<uint32_t>(c->data.code);
-		tag->write<uint32_t>(c->current.position);
+	// Each 10-byte event names the physical side which acquired its
+	// generation-1 controller; YRPX preserves both changes in one replay.
+	for(uint8_t side = 0; side < 2; ++side) {
+		auto event = pduel->new_message(MSG_DUEL_SUCCESSION);
+		event->write<uint8_t>(side);
+		event->write<uint8_t>(succession.controller_generation());
+		event->write<uint32_t>(succession.defeat_turn());
+		event->write<uint32_t>(succession.resume_turn());
 	}
-	// Recorded by YRPX and displayed by Inherited Duel-capable clients.
-	auto event = pduel->new_message(MSG_DUEL_SUCCESSION);
-	event->write<uint8_t>(0);
-	event->write<uint8_t>(succession.controller_generation());
-	event->write<uint32_t>(succession.defeat_turn());
-	event->write<uint32_t>(succession.resume_turn());
 	return true;
 }
 

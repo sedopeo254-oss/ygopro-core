@@ -24,6 +24,7 @@
 #include "processor_unit.h"
 #include "multiplayer.h"
 #include "duel_succession.h"
+#include "surprise_battle_phase.h"
 #include "progressivebuffer.h"
 
 class duel;
@@ -347,6 +348,8 @@ struct processor {
 	bool to_m2;
 	bool to_ep;
 	bool skip_m2;
+	// Same-turn End Phase -> Battle Phase -> End Phase (no turn skip).
+	surprise_battle_phase::State surprise_extra_battle;
 	bool chain_attack;
 	uint32_t chain_attacker_id;
 	card* chain_attack_target;

@@ -3532,6 +3532,7 @@ bool field::process(Processors::Turn& arg) {
 	switch(arg.step) {
 	case 0: {
 		//Pre Draw
+		core.surprise_extra_battle.reset();
 		core.used_event.clear();
 		for(auto& peffect : core.reseted_effects) {
 			pduel->delete_effect(peffect);
@@ -3820,6 +3821,15 @@ bool field::process(Processors::Turn& arg) {
 		return FALSE;
 	}
 	case 13: {
+		// An End Phase surprise attack re-enters the SAME turn's End Phase
+		// when its extra Battle Phase completes. Never enter Main Phase 2
+		// or advance to the opponent's turn in between.
+		if(core.surprise_extra_battle.finish_extra_battle()) {
+			arg.has_performed_second_battle_phase = false;
+			arg.step = 15;
+			adjust_all();
+			return FALSE;
+		}
 		if(!arg.has_performed_second_battle_phase && returns.at<int32_t>(1)) { // 2nd Battle Phase
 			arg.has_performed_second_battle_phase = true;
 			arg.step = 9;
@@ -3916,6 +3926,25 @@ bool field::process(Processors::Turn& arg) {
 		return FALSE;
 	}
 	case 19: {
+		// Request can only be registered during this End Phase, after a
+		// regular Battle Phase. Resolve every EP chain first, then restart
+		// the Battle Phase without publishing EVENT_TURN_END/MSG_NEW_TURN.
+		if(core.surprise_extra_battle.enter_extra_battle()) {
+			arg.step = 9; // next processor step is case 10: BATTLE_START
+			for(auto* pcard : player[turn_player].list_mzone) {
+				if(!pcard) continue;
+				pcard->attack_announce_count = 0;
+				pcard->announce_count = 0;
+				pcard->attacked_count = 0;
+				pcard->announced_cards.clear();
+				pcard->attacked_cards.clear();
+				pcard->battled_cards.clear();
+			}
+			core.attack_state_count[turn_player] = 0;
+			core.battled_count[turn_player] = 0;
+			adjust_all();
+			return FALSE;
+		}
 		raise_event(nullptr, EVENT_TURN_END, nullptr, 0, 0, turn_player, 0);
 		process_instant_event();
 		adjust_all();

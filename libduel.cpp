@@ -2327,6 +2327,34 @@ LUA_STATIC_FUNCTION(IsPhase) {
 	lua_pushboolean(L, pduel->game_field->infos.phase == phase);
 	return 1;
 }
+// Safe anime-only phase extension, also available to custom card scripts
+// in Standard, Tag, Battle Royale, 3v1 and Inherited Duel.
+LUA_STATIC_FUNCTION(CanRequestExtraBattlePhase) {
+	check_param_count(L, 1);
+	const auto tp = lua_get<uint8_t>(L, 1);
+	auto& fld = *pduel->game_field;
+	const bool can = fld.core.surprise_extra_battle.can_request(tp,
+		fld.infos.turn_player, fld.infos.phase,
+		fld.core.battle_phase_count[tp < 2 ? tp : 0], fld.core.force_turn_end)
+		&& !fld.is_player_affected_by_effect(tp, EFFECT_SKIP_BP)
+		&& !fld.is_player_affected_by_effect(tp, EFFECT_CANNOT_BP);
+	lua_pushboolean(L, can);
+	return 1;
+}
+LUA_STATIC_FUNCTION(RequestExtraBattlePhase) {
+	check_action_permission(L);
+	check_param_count(L, 1);
+	const auto tp = lua_get<uint8_t>(L, 1);
+	auto& fld = *pduel->game_field;
+	const bool allowed = tp <= 1
+		&& !fld.is_player_affected_by_effect(tp, EFFECT_SKIP_BP)
+		&& !fld.is_player_affected_by_effect(tp, EFFECT_CANNOT_BP)
+		&& fld.core.surprise_extra_battle.request(tp,
+			fld.infos.turn_player, fld.infos.phase,
+			fld.core.battle_phase_count[tp], fld.core.force_turn_end);
+	lua_pushboolean(L, allowed);
+	return 1;
+}
 LUA_STATIC_FUNCTION(SkipPhase) {
 	check_param_count(L, 4);
 	auto playerid = lua_get<uint8_t>(L, 1);

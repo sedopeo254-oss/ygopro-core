@@ -13,6 +13,7 @@
 #include "effect.h"
 #include "card.h"
 #include "field.h"
+#include "anime_zone_rules.h"
 #include "group.h"
 #include "interpreter.h"
 
@@ -1878,8 +1879,16 @@ bool field::process(Processors::BattleCommand& arg) {
 		card_vector first_attack;
 		card_vector must_attack;
 		if(!is_player_affected_by_effect(infos.turn_player, EFFECT_CANNOT_ATTACK_ANNOUNCE)) {
-			for(auto& pcard : player[infos.turn_player].list_mzone) {
-				if(!pcard || !belongs_to_turn_duelist(pcard))
+			card_vector anime_attackers;
+			for(auto* pcard : player[infos.turn_player].list_mzone)
+				if(pcard)
+					anime_attackers.push_back(pcard);
+			for(auto* pcard : player[infos.turn_player].list_szone)
+				if(pcard && pcard->current.sequence % 8 < 5
+						&& pcard->is_affected_by_effect(EFFECT_ORICA_SZONE))
+					anime_attackers.push_back(pcard);
+			for(auto* pcard : anime_attackers) {
+				if(!belongs_to_turn_duelist(pcard))
 					continue;
 				if(!pcard->is_capable_attack_announce(infos.turn_player))
 					continue;

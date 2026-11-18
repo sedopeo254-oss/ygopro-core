@@ -12,6 +12,7 @@
 #include "duel.h"
 #include "effect.h"
 #include "field.h"
+#include "anime_zone_rules.h"
 #include "duel_succession_transfer.h"
 #include "group.h"
 #include "interpreter.h"
@@ -3119,7 +3120,20 @@ int32_t field::get_attack_target(card* pcard, card_vector* v, bool chain_attack,
 			&& target->current.duelist != target_duelist;
 	};
 	card_vector auto_attack, only_attack, must_attack, attack_tg;
-	for(auto& atarget : player[target_side].list_mzone) {
+	// One deterministic target list for regular / restricted / mandatory
+	// attacks: the rear row becomes attackable only without front defenders.
+	card_vector anime_targets;
+	for(auto* target : player[target_side].list_mzone)
+		if(target && !outside_selected_field(target))
+			anime_targets.push_back(target);
+	if(anime_targets.empty()) {
+		for(auto* target : player[target_side].list_szone)
+			if(target && target->current.sequence % 8 < 5
+					&& target->is_affected_by_effect(EFFECT_ORICA_SZONE)
+					&& !outside_selected_field(target))
+				anime_targets.push_back(target);
+	}
+	for(auto& atarget : anime_targets) {
 		if(atarget && !outside_selected_field(atarget)) {
 			if(atarget->is_affected_by_effect(EFFECT_ONLY_BE_ATTACKED))
 				auto_attack.push_back(atarget);
@@ -3151,8 +3165,8 @@ int32_t field::get_attack_target(card* pcard, card_vector* v, bool chain_attack,
 		pv = &must_attack;
 	} else {
 		atype = 4;
-		for(auto& atarget : player[target_side].list_mzone)
-			if(atarget != core.attacker && !outside_selected_field(atarget))
+		for(auto* atarget : anime_targets)
+			if(atarget != core.attacker)
 				attack_tg.push_back(atarget);
 		if(multiplayer.mode() != MultiplayerMode::BATTLE_ROYALE
 				&& is_player_affected_by_effect(p, EFFECT_SELF_ATTACK)

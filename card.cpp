@@ -11,6 +11,7 @@
 #include <vector>
 #include <utility> //std::pair, std::make_pair, std::swap
 #include "card.h"
+#include "anime_zone_rules.h"
 #include "duel.h"
 #include "effect.h"
 #include "field.h"
@@ -480,7 +481,10 @@ uint32_t card::get_type(card* scard, uint64_t sumtype, uint8_t playerid) {
 int32_t card::get_base_attack() {
 	if(!(data.type & TYPE_MONSTER) && !(get_type() & TYPE_MONSTER) && !is_affected_by_effect(EFFECT_PRE_MONSTER))
 		return 0;
-	if (current.location != LOCATION_MZONE || get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
+	if (!anime_zone_rules::counts_as_monster(
+		anime_zone_rules::physical_row(current.location), true,
+		is_affected_by_effect(EFFECT_ORICA_SZONE) != nullptr, true)
+		|| get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
 		return data.attack;
 	if (has_valid_property_val(temp.base_attack))
 		return temp.base_attack;
@@ -549,7 +553,10 @@ int32_t card::get_attack() {
 		return search->second;
 	if(!(data.type & TYPE_MONSTER) && !(get_type() & TYPE_MONSTER) && !is_affected_by_effect(EFFECT_PRE_MONSTER))
 		return 0;
-	if (current.location != LOCATION_MZONE || get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
+	if (!anime_zone_rules::counts_as_monster(
+		anime_zone_rules::physical_row(current.location), true,
+		is_affected_by_effect(EFFECT_ORICA_SZONE) != nullptr, true)
+		|| get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
 		return data.attack;
 	if (has_valid_property_val(temp.attack))
 		return temp.attack;
@@ -682,7 +689,10 @@ int32_t card::get_base_defense() {
 		return 0;
 	if(!(data.type & TYPE_MONSTER) && !(get_type() & TYPE_MONSTER) && !is_affected_by_effect(EFFECT_PRE_MONSTER))
 		return 0;
-	if (current.location != LOCATION_MZONE || get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
+	if (!anime_zone_rules::counts_as_monster(
+		anime_zone_rules::physical_row(current.location), true,
+		is_affected_by_effect(EFFECT_ORICA_SZONE) != nullptr, true)
+		|| get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
 		return data.defense;
 	if (has_valid_property_val(temp.base_defense))
 		return temp.base_defense;
@@ -749,7 +759,10 @@ int32_t card::get_defense() {
 		return search->second;
 	if(!(data.type & TYPE_MONSTER) && !(get_type() & TYPE_MONSTER) && !is_affected_by_effect(EFFECT_PRE_MONSTER))
 		return 0;
-	if (current.location != LOCATION_MZONE || get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
+	if (!anime_zone_rules::counts_as_monster(
+		anime_zone_rules::physical_row(current.location), true,
+		is_affected_by_effect(EFFECT_ORICA_SZONE) != nullptr, true)
+		|| get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
 		return data.defense;
 	if (has_valid_property_val(temp.defense))
 		return temp.defense;
@@ -3754,6 +3767,11 @@ int32_t card::is_capable_cost_to_extra(uint8_t playerid) {
 	return TRUE;
 }
 int32_t card::is_capable_attack() {
+	// Spell & Trap cards can join combat only with a native rear-monster marker.
+	if(!anime_zone_rules::can_declare_attack(
+			anime_zone_rules::physical_row(current.location),
+			is_affected_by_effect(EFFECT_ORICA_SZONE) != nullptr, true))
+		return FALSE;
 	if(!is_position(POS_FACEUP_ATTACK) && !(is_position(POS_FACEUP_DEFENSE) && is_affected_by_effect(EFFECT_DEFENSE_ATTACK)))
 		return FALSE;
 	if(is_affected_by_effect(EFFECT_FORBIDDEN))

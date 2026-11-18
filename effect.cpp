@@ -8,6 +8,7 @@
 #include "card.h"
 #include "duel.h"
 #include "effect.h"
+#include "anime_zone_rules.h"
 #include "field.h"
 #include "interpreter.h"
 
@@ -447,16 +448,24 @@ int32_t effect::is_target(card* pcard) {
 			&& !pcard->is_position(POS_FACEUP))
 		return FALSE;
 	if(!is_flag(EFFECT_FLAG_IGNORE_RANGE)) {
+		// Logical monster effects reach explicitly marked rear-zone monsters,
+		// without considering ordinary S/T cards to be monsters.
+		auto matches_anime_range = [pcard](uint32_t range) {
+			if(pcard->current.location == LOCATION_SZONE
+					&& pcard->is_affected_by_effect(EFFECT_ORICA_SZONE))
+				return (range & LOCATION_MZONE) != 0;
+			return pcard->current.is_location(range);
+		};
 		if(pcard->get_status(STATUS_SUMMONING | STATUS_SUMMON_DISABLED | STATUS_ACTIVATE_DISABLED | STATUS_SPSUMMON_STEP))
 			return FALSE;
 		if(is_flag(EFFECT_FLAG_SPSUM_PARAM))
 			return FALSE;
 		if(is_flag(EFFECT_FLAG_ABSOLUTE_TARGET)) {
 			if(pcard->current.controler == 0) {
-				if(!pcard->current.is_location(s_range))
+				if(!matches_anime_range(s_range))
 					return FALSE;
 			} else {
-				if(!pcard->current.is_location(o_range))
+				if(!matches_anime_range(o_range))
 					return FALSE;
 			}
 		} else {
@@ -467,10 +476,10 @@ int32_t effect::is_target(card* pcard) {
 					&& pcard->current.duelist == handler->current.duelist
 				: pcard->current.controler == get_handler_player();
 			if(same_player) {
-				if(!pcard->current.is_location(s_range))
+				if(!matches_anime_range(s_range))
 					return FALSE;
 			} else {
-				if(!pcard->current.is_location(o_range))
+				if(!matches_anime_range(o_range))
 					return FALSE;
 			}
 		}

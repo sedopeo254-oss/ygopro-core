@@ -35,10 +35,10 @@ struct Policy {
 	uint32_t features{NONE};
 	uint8_t rear_slot_limit{5};
 	int32_t attack_bonus{0};
-	bool has(uint32_t feature) const {
+	constexpr bool has(uint32_t feature) const {
 		return (features & feature) == feature;
 	}
-	bool valid() const {
+	constexpr bool valid() const {
 		return rear_slot_limit <= 5 && attack_bonus >= -999999
 			&& attack_bonus <= 999999;
 	}

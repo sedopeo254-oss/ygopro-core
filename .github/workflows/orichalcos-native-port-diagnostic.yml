@@ -1,0 +1,47 @@
+name: Evaluate KCG Orichalcos Native Core Port
+
+on:
+  push:
+    branches:
+      - experiment/orichalcos-kcg-native-integration-20261118
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-port:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect KCG source ancestry and Orichalcos integration conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags https://github.com/knight00/ocgcore-KCG.git master
+          echo "Our core: $(git rev-parse HEAD)"
+          echo "KCG core: $(git rev-parse FETCH_HEAD)"
+          ancestor=$(git merge-base HEAD FETCH_HEAD || true)
+          echo "Shared ancestor: ${ancestor:-NONE}"
+          if [ -z "$ancestor" ]; then
+            echo "Different histories. Full 3-way merge cannot preserve custom modes."
+            exit 0
+          fi
+          set +e
+          git merge --no-commit --no-ff FETCH_HEAD 2>&1 | tee /tmp/kcg-native-merge.log
+          code="${PIPESTATUS[0]}"
+          set -e
+          echo "Native KCG merge result code: $code"
+          echo "Conflicting source files:"
+          git diff --name-only --diff-filter=U || true
+          echo "Number of conflicted files: $(git diff --name-only --diff-filter=U | wc -l)"
+          echo "Uncommitted clean-merge source count: $(git diff --cached --name-only | wc -l)"
+          if [ "$code" -eq 0 ]; then
+            echo "Clean merge is only SOURCE-level, not runtime compatibility."
+            echo "All existing multiplayer behavior still needs regression tests."
+          else
+            echo "Do not replace the custom five-mode core with KCG binaries."
+          fi
+          git merge --abort || true

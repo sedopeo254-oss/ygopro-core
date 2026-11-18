@@ -2329,6 +2329,13 @@ LUA_STATIC_FUNCTION(IsPhase) {
 }
 // Safe anime-only phase extension, also available to custom card scripts
 // in Standard, Tag, Battle Royale, 3v1 and Inherited Duel.
+// Feature detection intentionally stays false until a physically playable
+// back-row summon, attack, targeting, and replay path is integrated and
+// validated. Scripts must never infer Core support from constants alone.
+LUA_STATIC_FUNCTION(SupportsOrichalcosZones) {
+	lua_pushboolean(L, false);
+	return 1;
+}
 LUA_STATIC_FUNCTION(CanRequestExtraBattlePhase) {
 	check_param_count(L, 1);
 	const auto tp = lua_get<uint8_t>(L, 1);

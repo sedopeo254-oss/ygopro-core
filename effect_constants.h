@@ -122,6 +122,18 @@ inline effect_flag operator|(effect_flag flag1, effect_flag flag2)
 #define EFFECT_TRAP_ACT_IN_SET_TURN         16
 #define EFFECT_REMAIN_FIELD                 17
 #define EFFECT_MONSTER_SSET                 18
+ // Anime Zone Extensions: reserve a self-contained namespace.
+ // Runtime behavior is gated until its physical-zone and battle semantics
+ // are validated; constants alone do not enable any new duel rule.
+ #define EFFECT_ANIME_FIELD_ROW             2005
+ #define EFFECT_ANIME_BACKROW_MONSTER       2006
+ #define EFFECT_ANIME_OPPOSING_ROW          2007
+ #define EFFECT_ANIME_FRONTROW_SPELL        2008
+ #define EFFECT_ORICA EFFECT_ANIME_FIELD_ROW
+ #define EFFECT_ORICA_SZONE EFFECT_ANIME_BACKROW_MONSTER
+ #define EFFECT_SANCT EFFECT_ANIME_OPPOSING_ROW
+ #define EFFECT_SANCT_MZONE EFFECT_ANIME_FRONTROW_SPELL
+
 #define EFFECT_QP_ACT_IN_SET_TURN           19
 #define EFFECT_CANNOT_SUMMON                20
 #define EFFECT_CANNOT_FLIP_SUMMON           21

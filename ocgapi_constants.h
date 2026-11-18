@@ -18,6 +18,13 @@
 #define LOCATION_EXTRA   0x40
 #define LOCATION_OVERLAY 0x80
 #define LOCATION_ONFIELD (LOCATION_MZONE | LOCATION_SZONE)
+// Virtual rows for anime scripts. Physical card locations remain MZONE
+// or SZONE in network messages, replay, and Core's zone arrays.
+#define LOCATION_ANIME_FRONTROW 0x2000
+#define LOCATION_ANIME_BACKROW  0x4000
+#define LOCATION_RMZONE LOCATION_ANIME_FRONTROW
+#define LOCATION_RSZONE LOCATION_ANIME_BACKROW
+
 
 /* Positions */
 #define POS_FACEUP_ATTACK    0x1

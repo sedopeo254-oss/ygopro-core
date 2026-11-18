@@ -1648,6 +1648,18 @@ LUA_FUNCTION(IsOnField) {
 LUA_FUNCTION(IsLocation) {
 	check_param_count(L, 2);
 	auto loc = lua_get<uint16_t>(L, 2);
+	if(loc == LOCATION_RMZONE) {
+		lua_pushboolean(L, self->current.location == LOCATION_MZONE
+			&& !self->get_status(STATUS_SUMMONING | STATUS_SUMMON_DISABLED | STATUS_SPSUMMON_STEP));
+		return 1;
+	}
+	if(loc == LOCATION_RSZONE) {
+		lua_pushboolean(L, self->current.location == LOCATION_SZONE
+			&& self->current.sequence % 8 < 5
+			&& self->is_affected_by_effect(EFFECT_ORICA_SZONE)
+			&& !self->is_status(STATUS_ACTIVATE_DISABLED));
+		return 1;
+	}
 	if(self->current.location == LOCATION_MZONE) {
 		if(self->current.is_location(loc) && !self->get_status(STATUS_SUMMONING | STATUS_SUMMON_DISABLED | STATUS_SPSUMMON_STEP))
 			lua_pushboolean(L, 1);

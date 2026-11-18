@@ -2285,6 +2285,16 @@ int32_t field::filter_matching_card(int32_t findex, uint8_t self, uint32_t locat
 								get_pzone_index(1, side), logical_duelist)])))
 				return TRUE;
 		}
+		if(location & LOCATION_RMZONE)
+			if(check_list(player[side].list_mzone, scope_mzonechk))
+				return TRUE;
+		if(location & LOCATION_RSZONE)
+			if(check_list(player[side].list_szone, [&](auto* pcard) {
+				return pcard && pcard->current.sequence % 8 < 5
+					&& pcard->is_affected_by_effect(EFFECT_ORICA_SZONE)
+					&& scope_szonechk(pcard);
+			}))
+				return TRUE;
 		if((location & LOCATION_DECK) && check_list(get_logical_list(side, LOCATION_DECK, logical_duelist), checkc))
 			return TRUE;
 		if((location & LOCATION_EXTRA) && check_list(get_logical_list(side, LOCATION_EXTRA, logical_duelist), checkc))
@@ -2397,6 +2407,16 @@ int32_t field::filter_field_card(uint8_t self, uint32_t location1, uint32_t loca
 				}
 			}
 		}
+		// Explicit anime row groups preserve physical S/T and monster slots.
+		if(location & LOCATION_RMZONE)
+			for(auto* pcard : player[side].list_mzone)
+				if(pcard && !pcard->get_status(STATUS_SUMMONING | STATUS_SPSUMMON_STEP))
+					add_card(pcard);
+		if(location & LOCATION_RSZONE)
+			for(auto* pcard : player[side].list_szone)
+				if(pcard && pcard->current.sequence % 8 < 5
+						&& pcard->is_affected_by_effect(EFFECT_ORICA_SZONE))
+					add_card(pcard);
 		if(location & LOCATION_HAND) {
 			auto& list = get_logical_list(side, LOCATION_HAND, logical_duelist);
 			if(pgroup)

@@ -795,9 +795,16 @@ LUA_STATIC_FUNCTION(MoveToField) {
 	if(playerid != 0 && playerid != 1)
 		return 0;
 	auto destination = lua_get<uint16_t>(L, 4);
+	const bool virtual_rear = destination == LOCATION_RSZONE;
+	if(destination == LOCATION_RMZONE)
+		destination = LOCATION_MZONE;
+	else if(virtual_rear)
+		destination = LOCATION_SZONE;
 	auto positions = lua_get<uint8_t>(L, 5);
 	auto enable = lua_get<bool>(L, 6);
 	auto zone = lua_get<uint32_t, 0xff>(L, 7);
+	if(virtual_rear)
+		zone &= 0x1f;
 	pcard->enable_field_effect(false);
 	pduel->game_field->adjust_instant();
 	pduel->game_field->move_to_field(pcard, move_player, playerid, destination, positions, enable, 0, zone);
@@ -1938,12 +1945,19 @@ LUA_STATIC_FUNCTION(CheckSummonedCount) {
 LUA_STATIC_FUNCTION(GetLocationCount) {
 	check_param_count(L, 2);
 	auto playerid = lua_get<uint8_t>(L, 1);
-	auto location = lua_get<uint8_t>(L, 2);
+	auto location = lua_get<uint16_t>(L, 2);
+	const bool virtual_rear = location == LOCATION_RSZONE;
+	if(location == LOCATION_RMZONE)
+		location = LOCATION_MZONE;
+	else if(virtual_rear)
+		location = LOCATION_SZONE;
 	if(playerid != 0 && playerid != 1)
 		return 0;
 	auto uplayer = lua_get<uint8_t>(L, 3, pduel->game_field->core.reason_player);
 	auto reason = lua_get<uint32_t, LOCATION_REASON_TOFIELD>(L, 4);
 	auto zone = lua_get<uint32_t, 0xff>(L, 5);
+	if(virtual_rear)
+		zone &= 0x1f;
 	uint32_t list = 0;
 	lua_pushinteger(L, pduel->game_field->get_useable_count(nullptr, playerid, location, uplayer, reason, zone, &list));
 	lua_pushinteger(L, list);
@@ -2135,7 +2149,13 @@ LUA_STATIC_FUNCTION(CheckLocation) {
 	auto sequence = lua_get<uint32_t>(L, 3);
 	if(playerid != 0 && playerid != 1)
 		return 0;
-	lua_pushboolean(L, pduel->game_field->is_location_useable(playerid, location, sequence));
+	const bool virtual_rear = location == LOCATION_RSZONE;
+	if(location == LOCATION_RMZONE)
+		location = LOCATION_MZONE;
+	else if(virtual_rear)
+		location = LOCATION_SZONE;
+	lua_pushboolean(L, (!virtual_rear || sequence < 5)
+		&& pduel->game_field->is_location_useable(playerid, location, sequence));
 	return 1;
 }
 LUA_STATIC_FUNCTION(GetCurrentChain) {
